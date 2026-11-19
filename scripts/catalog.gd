@@ -16,6 +16,8 @@ extends RefCounted
 ##   tank        a coolant reservoir; its own hose can go to a tap, which keeps it full
 ##   radiator    watts it sheds per degree its coolant is above the surrounding air
 ##   wear        Q puts it on
+##   sensor      "room" | "power" | "coolant": its reading shows up on every ops screen
+##   screen      shows the company dashboard while powered
 ##   used        second-hand: may turn out to be dead when unpacked
 ##   max_watts   power strips: more than this through them for 1.5 s and they catch fire
 ##   cool        {"vent": extra W per degree the room loses} or {"remove": W of heat taken out}; needs power
@@ -37,6 +39,7 @@ const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
 const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100",
 	"powerstrip", "switch", "rack", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
+	"thermometer", "sensor_power", "sensor_coolant", "screen",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
 	"fan", "aircon", "extinguisher", "crate"]
 
@@ -222,6 +225,29 @@ static func _build() -> Dictionary:
 			[Vector3(0.5, 0.2, 0.4), Vector3(0, -0.02, 0), Color(0.8, 0.82, 0.85), 0.0],
 			[Vector3(0.3, 0.06, 0.2), Vector3(0, 0.1, 0), Color(0.95, 0.75, 0.2), 0.0],
 		]},
+		# --- knowing what is going on: sensors feed the big ops screen ---
+		"thermometer": {"label": "Thermometer", "price": 20, "wall": true, "sensor": "room",
+			"size": Vector3(0.1, 0.3, 0.04), "mass": 0.2, "parts": [
+				[Vector3(0.1, 0.3, 0.03), Vector3.ZERO, Color(0.95, 0.95, 0.92), 0.0],
+				[Vector3(0.02, 0.2, 0.012), Vector3(0, 0.02, -0.018), Color(0.9, 0.15, 0.1), 0.6],
+				[Vector3(0.05, 0.05, 0.02), Vector3(0, -0.11, -0.018), Color(0.9, 0.15, 0.1), 0.6],
+			]},
+		"sensor_power": {"label": "Power meter", "price": 60, "power_port": true, "sensor": "power", "fragile": true,
+			"size": Vector3(0.16, 0.1, 0.1), "mass": 0.4, "parts": [
+				[Vector3(0.16, 0.1, 0.1), Vector3.ZERO, Color(0.95, 0.8, 0.15), 0.0],
+				[Vector3(0.11, 0.05, 0.01), Vector3(0, 0.01, -0.051), Color(0.2, 1.0, 0.5), 1.5, "led"],
+			]},
+		"sensor_coolant": {"label": "Coolant sensor", "price": 80, "coolant_port": true, "sensor": "coolant",
+			"size": Vector3(0.16, 0.12, 0.12), "mass": 0.5, "parts": [
+				[Vector3(0.16, 0.12, 0.12), Vector3.ZERO, Color(0.2, 0.45, 0.9), 0.0],
+				[Vector3(0.1, 0.1, 0.01), Vector3(0, 0, -0.061), Color(0.95, 0.95, 0.95), 0.0],
+				[Vector3(0.01, 0.05, 0.012), Vector3(0.015, 0.015, -0.064), Color(0.9, 0.15, 0.1), 0.0],
+			]},
+		"screen": {"label": "Ops screen", "price": 250, "watts": 60.0, "power_port": true, "wall": true,
+			"fragile": true, "screen": true,
+			"size": Vector3(1.6, 0.94, 0.06), "mass": 8.0, "parts": [
+				[Vector3(1.6, 0.94, 0.05), Vector3(0, 0, 0.005), Color(0.08, 0.09, 0.12), 0.0],
+			]},
 		# --- keeping it from burning down ---
 		"fan": {"label": "Box fan", "price": 45, "watts": 30.0, "power_port": true, "fragile": true,
 			"cool": {"vent": 45.0},

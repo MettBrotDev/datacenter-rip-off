@@ -42,6 +42,7 @@ var load := 0.0         # watts currently drawn from it
 var _world: Node3D
 var _leds: Array = []
 var _light: OmniLight3D   # lamps only
+var _screen: Node3D       # ops screens only
 var _fire: Node3D         # flames and their glow, while burning
 var _shell: MeshInstance3D   # heat suit only: the silver shell shown while it is worn
 var _target_pos := Vector3.ZERO
@@ -102,6 +103,12 @@ func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 
 func _ready() -> void:
 	_world = get_parent().get_parent()
+	if def.get("screen", false):   # an ops screen you can hang anywhere; dark without power
+		_screen = preload("res://scripts/ops_screen.gd").new()
+		_screen.setup(_world.board, def["size"].x - 0.08, false)
+		_screen.position.z = -def["size"].z * 0.5
+		_screen.visible = false
+		add_child(_screen)
 	apply_mode()
 
 
@@ -164,6 +171,8 @@ func set_status(bits: int) -> void:
 	var power := bits & 3
 	if _light:
 		_light.visible = power == 3
+	if _screen:
+		_screen.visible = power == 3
 	for mat: StandardMaterial3D in _leds:
 		Catalog.set_light(mat, 2 if power == 3 else (1 if power == 1 else 0))
 

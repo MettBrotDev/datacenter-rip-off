@@ -12,8 +12,8 @@ const GRAVITY := 13.0
 const SENS := 0.0022
 const KEYS := {"power": "F", "net": "G", "coolant": "H"}
 const WORDS := {"power": "power cable", "net": "network cable", "coolant": "coolant hose"}
-const HEAT_SAFE := 38.0       # room temperature a person can take indefinitely
-const HEAT_SCALE := 600.0     # degree-seconds above that before passing out (45 C: about 85 s)
+const HEAT_SAFE := 50.0       # room temperature a person can take indefinitely (generous on purpose)
+const HEAT_SCALE := 600.0     # degree-seconds above that before passing out (60 C: a minute)
 
 var peer_id := 1
 var is_local := false
@@ -314,7 +314,10 @@ func _update_actions() -> void:
 			acts.append(["use", "[Q] Switch the pump %s" % ("off" if t.running else "on"), _world.request_use.bind(t.id)])
 			if not t.running:
 				acts.append(["rotate", "[R] Drain the hoses back into the reservoir", _world.request_drain.bind(t.id)])
-			acts.append(["", "Coolant at %d °C%s" % [t.heat, "" if t.status == 3 else ("   not moving" if t.running else "")], Callable()])
+			var moving := "Water is moving" if t.status == 3 else ("Switched on but nothing is moving" if t.running else "Off")
+			var reading := "Coolant at %d °C" % t.heat if _world.loop_measured(t.id) \
+					else "No coolant sensor on this loop: temperature unknown"
+			acts.append(["", "%s. %s" % [moving, reading], Callable()])
 		if t.def.has("tank"):
 			acts.append(["", "Reservoir %d%% full%s" % [ceilf(t.fuel * 100.0),
 					"   kept full by the tap" if t.coolant_to < 0 else "   (bucket, or hose it to a tap)"], Callable()])
@@ -375,7 +378,7 @@ func _update_actions() -> void:
 	for act: Array in acts:
 		lines.append(act[1])
 	_world.hud.set_prompt("\n".join(lines))
-	_world.hud.set_temp(_world.temp_at(position))
+	_world.hud.set_temp(_world.temp_at(position), _world.temp_known_at(position))
 	_ghost.visible = _place_xf != null
 	if _place_xf != null:
 		(_ghost.mesh as BoxMesh).size = held.def["size"]

@@ -46,8 +46,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   with a radiator on the same pump, outdoors. Hoses have a fill level (`Item.hose`). Unplugging a full
   hose makes a puddle; with the pump running it sprays and ruins electronics nearby (`world._unplug`).
   Pumps can drain their hoses first. Puddles (`world.puddles`) ruin electronics standing in them.
-- People: above 38 C the local player's `exposure` builds up; at 100% they pass out and wake on the
+- People: above 50 C (deliberately generous) the local player's `exposure` builds up; at 100% they pass out and wake on the
   driveway. A worn heat suit (`Item.worn`) prevents it and slows walking.
+- Ops screen: `ops_board.gd` is one SubViewport dashboard shown by every `ops_screen.gd` (a fixed one on
+  the garage's back wall, plus the buyable `screen` item). Headline numbers are always on it; details
+  need sensors (`sensor` in the catalog: thermometer, power meter, coolant sensor). The same gating
+  applies to the HUD's "HERE" temperature and the pump's prompt.
 - Fire comes from causes that make sense: power strips over 2000 W, and used servers whose thermal
   protection is broken (`Item.sketchy`). It ruins items after 6 s, spreads to flammable neighbours,
   and is put out with an extinguisher or by rain.

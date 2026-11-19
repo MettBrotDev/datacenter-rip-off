@@ -137,8 +137,12 @@ func set_stats(money: float, tokens: float, watts: float, capacity: float, profi
 	_offer.refresh()
 
 
-## Temperature where the local player is standing.
-func set_temp(degrees: float) -> void:
+## Temperature where the local player is standing; indoors that takes a thermometer in the building.
+func set_temp(degrees: float, known: bool) -> void:
+	if not known:
+		_values["HERE"].text = "? °C"
+		_values["HERE"].add_theme_color_override("font_color", UI.DIM)
+		return
 	_values["HERE"].text = "%d °C" % degrees
 	_values["HERE"].add_theme_color_override("font_color",
 			UI.RED if degrees >= 50.0 else (Color(1.0, 0.65, 0.2) if degrees >= 40.0 else UI.TEXT))

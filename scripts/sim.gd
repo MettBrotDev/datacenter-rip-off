@@ -50,6 +50,7 @@ var tripped: Dictionary = {}   # circuit id -> true while its breaker is off
 var weather := 0        # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
 var temps: Dictionary = {}     # circuit id -> degrees C of the air inside that building
+var wiring: Dictionary = {}    # circuit id -> watts currently drawn through that building's wiring
 
 var _over: Dictionary = {}     # root key or strip id -> consecutive steps above its limit
 var _said: Dictionary = {}     # message key -> clock time it was last announced
@@ -80,7 +81,7 @@ func pump_for(it: Node3D, world: Node3D) -> Node3D:
 			if other.def.has("pump") and other.coolant_to == it.id:
 				return other
 		return null
-	return world.items.get(_pump(it, world))
+	return world.items.get(pump_id(it, world.items))
 
 
 ## Advances the simulation. Returns {item id: status bits}; appends messages for players to `events`.
@@ -164,6 +165,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	for c: int in circuits:
 		var key := -(c + 1)
 		var on_wiring: float = loads.get(key, 0.0)
+		wiring[c] = on_wiring
 		if not tripped.has(c) and _overloaded(key, on_wiring, circuits[c][0], dt):
 			tripped[c] = true
 			events.append("Breaker tripped in %s! %d W on wiring rated for %d W" % [circuits[c][1], on_wiring, circuits[c][0]])
@@ -236,7 +238,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	var gpus := {}      # server id -> [GPUs mounted on it that still work]
 	for it: Node3D in items.values():
 		if it.def.get("coolant_port", false) and not it.def.has("pump") and not it.def.has("tank"):
-			pump_of[it.id] = _pump(it, world)
+			pump_of[it.id] = pump_id(it, world.items)
 		if it.parent != 0 and it.def.get("group", "") == "gpu" and not ruined.has(it.id):
 			if not gpus.has(it.parent):
 				gpus[it.parent] = []
@@ -327,6 +329,7 @@ func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into
 			continue
 		if pump.heat == 0.0:
 			pump.heat = outside
+		pump.load = into.get(pump.id, 0.0) if flowing[pump.id] else 0.0   # heat it is carrying, for sensors
 		var tank := _tank(pump, world)
 		if tank != null and tank.coolant_to < 0:
 			tank.fuel = 1.0      # plumbed to the tap: tops itself up
@@ -391,7 +394,7 @@ func _room_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: 
 		var now: float = temps.get(c, outside)
 		now += (target - now) * (1.0 - exp(-dt / ROOM_TIME))
 		temps[c] = now
-		if now >= 45.0:
+		if now >= 55.0:
 			_say(events, "room%d" % c, "It is %d °C in %s. Nobody should stay in there for long." % [now, circuits[c][1]])
 
 
@@ -507,14 +510,31 @@ func _source(it: Node3D, world: Node3D, limit: Dictionary, via_sockets: bool, ru
 
 
 ## Follows a coolant hose chain through manifolds to the pump at the end. 0 if there is none.
-func _pump(it: Node3D, world: Node3D) -> int:
+## Static so that clients (which have no simulation) can ask the same question.
+static func pump_id(it: Node3D, items: Dictionary) -> int:
 	var cur := it
 	for hop in 16:
-		var next: Node3D = world.items.get(cur.coolant_to) if cur.coolant_to > 0 else null
+		var next: Node3D = items.get(cur.coolant_to) if cur.coolant_to > 0 else null
 		if next == null or next.provides != "coolant" or next.def.has("tank"):
 			return 0
 		if next.def.has("pump"):
 			return next.id
+		cur = next
+	return 0
+
+
+## What a power cable ends in, without judging whether it is live: a generator's item id,
+## -(circuit + 1) for a building's wall socket, or 0. Static, for sensors on any peer.
+static func power_end(it: Node3D, items: Dictionary, world: Node3D) -> int:
+	var cur := it
+	for hop in 16:
+		var next: Node3D = items.get(cur.power_to) if cur.power_to > 0 else null
+		if next == null or next.provides != "power":
+			return 0
+		if next.def.has("gen"):
+			return next.id
+		if next.def.get("bus", false):
+			return -(world.circuit_at(next.global_position) + 1)
 		cur = next
 	return 0
 

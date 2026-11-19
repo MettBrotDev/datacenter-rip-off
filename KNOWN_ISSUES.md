@@ -27,6 +27,9 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Only the garage has a garden tap. Elsewhere reservoirs are filled by bucket.
 - Buckets only fill reservoirs; you cannot throw water on a fire or on a friend.
 - Puddles are flat discs that ignore walls, and nothing mops them up: they dry by themselves.
+- The ops screen text is small from across the garage; it reads well from a few steps away.
+- Flow rate is a fixed 20 l/min per running pump; "back" temperature is shown but does not affect anything.
+- Without a thermometer the HUD shows "? °C" indoors even while you are overheating; the red screen tint is the only warning.
 - Passing out from heat just moves you to the driveway. Nobody has to rescue you.
 - A server with one liquid-cooled card and one ordinary card is treated as fully liquid-cooled.
 - Fire does not hurt players, walls or houses, only items. Extinguishers never run out.

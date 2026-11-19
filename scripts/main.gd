@@ -323,19 +323,37 @@ func _selftest() -> void:
 	world.temps[garage] = 60.0
 	me.position = Vector3(0, 0, 0)
 	me.exposure = 0.0
-	me._feel_heat(20.0)
-	print("CHECK 20 s at 60 °C without a suit: exposure %d%%" % (me.exposure * 100.0))
-	me._feel_heat(20.0)
-	print("CHECK 40 s at 60 °C: now at %.1v (fainted and moved outside if z is 6.5)" % me.position)
+	me._feel_heat(30.0)
+	print("CHECK 30 s at 60 °C without a suit: exposure %d%%" % (me.exposure * 100.0))
+	me._feel_heat(35.0)
+	print("CHECK 65 s at 60 °C: now at %.1v (fainted and moved outside if z is 6.5)" % me.position)
 	me.position = _by_kind()["suit"].global_position + Vector3(0, 0, 1)
 	world.request_use(_by_kind()["suit"].id)
 	me.position = Vector3(0, 0, 0)
 	me.exposure = 0.0
 	me._feel_heat(600.0)
 	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
-	me.position = Vector3(0.3, 0, 0.6)   # leave the camera looking at the pump, reservoir and hoses
-	me.rotation.y = -2.67
-	me.head.rotation.x = -0.4
+
+	# 15. sensors feed the ops board: nothing is listed until they are installed
+	print("CHECK board with no sensors: %s" % str(world.board.readings(world)))
+	await _buy(["thermometer", "sensor_power", "sensor_coolant"])
+	kit = _by_kind()
+	for step: Array in [["thermometer", Vector3(-1.0, 0.2, -2.0)], ["sensor_power", Vector3(0.6, 0.06, 2.6)],
+			["sensor_coolant", Vector3(2.4, 0.07, 3.0)]]:
+		me.position = kit[step[0]].global_position + Vector3(0, 0, -1)
+		world.request_grab(kit[step[0]].id)
+		me.position = Vector3(1.5, 0, 3.0)
+		world.request_place(Transform3D(Basis(), step[1]))
+	world.request_link(kit["sensor_power"].id, "power", kit["gen_mower"].id)
+	world.request_link(kit["sensor_coolant"].id, "coolant", pump.id)
+	world.request_use(pump.id)
+	await _run(30.0)
+	for line: String in world.board.readings(world):
+		print("CHECK board: " + line)
+	print("CHECK thermometer in the garage lets you read the room: %s" % world.temp_known_at(Vector3.ZERO))
+	me.position = Vector3(0.6, 0, 1.2)   # leave the camera looking at the big screen
+	me.rotation.y = 0.15
+	me.head.rotation.x = 0.12
 
 
 ## Lets simulated time pass quickly: `seconds` of game time in half-second steps.

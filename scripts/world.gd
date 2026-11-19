@@ -19,6 +19,8 @@ const SIM_STEP := 0.5
 const Weather = preload("res://scripts/weather.gd")
 const House = preload("res://scripts/house.gd")
 const Dumpster = preload("res://scripts/dumpster.gd")
+const OpsBoard = preload("res://scripts/ops_board.gd")
+const OpsScreen = preload("res://scripts/ops_screen.gd")
 const Town = preload("res://scripts/town.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
 const LINKS := {"power": "power cable", "net": "network cable", "coolant": "coolant hose"}   # link type -> its name
@@ -50,6 +52,9 @@ var houses: Dictionary = {}      # house id -> House (0 is the landlady's, next 
 var temps: Dictionary = {}       # circuit id -> degrees C inside that building
 var outside_temp := 20.0
 var cables: Cables
+var board: OpsBoard              # the dashboard every ops screen shows
+var profit := 0.0                # $ per second
+var wiring: Dictionary = {}      # circuit id -> watts drawn through that building's wiring
 var puddles: Array = []          # [{"pos", "radius", "left"}] water on the floor
 var doa_chance := 0.12           # host: odds that a used part turns out dead when unpacked
 var door_open := false
@@ -79,6 +84,13 @@ func _ready() -> void:
 		add_child(load(OUTSIDE).new())
 	for f: Node3D in fixtures.values():
 		f.circuit = GARAGE_CIRCUIT
+	board = OpsBoard.new()
+	add_child(board)
+	var wall_screen := OpsScreen.new()   # the big one on the garage's back wall; needs no power
+	wall_screen.setup(board, 3.0, true)
+	wall_screen.position = Vector3(-0.4, 1.85, -3.42)
+	wall_screen.rotation.y = PI
+	add_child(wall_screen)
 	_build_houses()
 	_dumpster = Dumpster.new()
 	_dumpster.position = Vector3(4.9, 0, 8.2)   # on the grass beside the driveway
@@ -192,6 +204,25 @@ func vent_factor(circuit: int) -> float:
 	if h == null:
 		return 1.0
 	return 25.0 if h.state == House.GONE else (2.0 if h.door_open else 1.0)
+
+
+## Is there a thermometer where this player stands? Outdoors you can always tell.
+func temp_known_at(pos: Vector3) -> bool:
+	var c := circuit_at(pos)
+	if c < 0:
+		return true
+	for it: Item in items.values():
+		if it.def.get("sensor", "") == "room" and it.holder == 0 and circuit_at(it.global_position) == c:
+			return true
+	return false
+
+
+## Does this pump's loop have a coolant sensor on it?
+func loop_measured(pump_id: int) -> bool:
+	for it: Item in items.values():
+		if it.def.get("sensor", "") == "coolant" and it.holder == 0 and Sim.pump_id(it, items) == pump_id:
+			return true
+	return false
 
 
 ## The temperature a player standing here feels: the building they are in, or the weather.
@@ -860,7 +891,7 @@ func _sim_step(dt: float) -> void:
 				or it.def.get("group", "") == "server" or it.coolant_to != 0 or it.hose > 0.0:
 			gens[it.id] = [it.running, it.fuel, it.rider, it.load, it.hose, it.heat]
 	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather,
-		_sim.temps, _sim.outside_temp()], status, gens])
+		_sim.temps, _sim.outside_temp(), _sim.wiring], status, gens])
 
 
 ## A pinned item whose support was taken away (the crate under it got picked up...) falls.
@@ -1002,6 +1033,8 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 	weather = company[6]
 	temps = company[7]
 	outside_temp = company[8]
+	wiring = company[9]
+	profit = company[4]
 	_weather.set_weather(weather)
 	hud.set_weather(weather)
 	for id: int in status:
@@ -1023,6 +1056,7 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 		if f.kind == "breaker":
 			f.set_lamp(1 if tripped_circuits.has(f.circuit) else 2)
 	hud.set_stats(money, tokens, watts, capacity, company[4], tripped)
+	board.refresh(self)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1062,6 +1096,7 @@ func _r_door(open: bool) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _r_toast(text: String) -> void:
 	hud.toast(text)
+	board.alert(text)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
