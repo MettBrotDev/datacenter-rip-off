@@ -119,5 +119,8 @@ func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
 func _mat(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
-	m.roughness = 0.55
+	m.roughness = 0.4
+	m.clearcoat_enabled = true
+	m.clearcoat = 0.3
+	m.clearcoat_roughness = 0.35
 	return m

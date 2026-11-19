@@ -510,13 +510,7 @@ static func parcel(kind: String) -> Dictionary:
 static func build_parts(node: Node3D, parts: Array) -> Array:
 	var tagged := []
 	for part: Array in parts:
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = part[2]
-		mat.roughness = 0.6
-		if part[3] > 0.0:
-			mat.emission_enabled = true
-			mat.emission = part[2]
-			mat.emission_energy_multiplier = part[3]
+		var mat: StandardMaterial3D = preload("res://scripts/materials.gd").hardware(part[2], part[3] * 1.5)
 		if part.size() > 4:
 			mat.set_meta("color", part[2])
 			mat.set_meta("energy", part[3])
@@ -534,4 +528,4 @@ static func set_light(mat: StandardMaterial3D, level: int) -> void:
 		c = Color(1.0, 0.45, 0.05)
 	mat.albedo_color = c if level > 0 else c.darkened(0.85)
 	mat.emission = c
-	mat.emission_energy_multiplier = mat.get_meta("energy") if level > 0 else 0.0
+	mat.emission_energy_multiplier = float(mat.get_meta("energy")) * 1.5 if level > 0 else 0.0

@@ -4,19 +4,22 @@ extends Node3D
 
 # One entry per Catalog.WEATHER state.
 const LOOKS: Array[Dictionary] = [
-	{"top": Color(0.22, 0.46, 0.9), "horizon": Color(0.72, 0.84, 0.96), "sun": 1.3, "ambient": 0.5,
-		"cloud": Color(1.0, 1.0, 1.0, 0.0)},
-	{"top": Color(0.45, 0.54, 0.68), "horizon": Color(0.78, 0.81, 0.85), "sun": 0.5, "ambient": 0.48,
-		"cloud": Color(0.92, 0.93, 0.95, 0.95)},
-	{"top": Color(0.27, 0.3, 0.35), "horizon": Color(0.44, 0.47, 0.51), "sun": 0.1, "ambient": 0.36,
-		"cloud": Color(0.36, 0.38, 0.42, 1.0)},
+	{"top": Color(0.24, 0.5, 0.92), "horizon": Color(0.74, 0.85, 0.97), "sun": 1.5, "ambient": 0.5,
+		"cloud": Color(1.0, 1.0, 1.0, 0.0), "fog": 0.0012, "sat": 1.18},
+	{"top": Color(0.45, 0.54, 0.68), "horizon": Color(0.78, 0.81, 0.85), "sun": 0.5, "ambient": 0.5,
+		"cloud": Color(0.92, 0.93, 0.95, 0.95), "fog": 0.0024, "sat": 1.02},
+	{"top": Color(0.27, 0.3, 0.35), "horizon": Color(0.44, 0.47, 0.51), "sun": 0.1, "ambient": 0.4,
+		"cloud": Color(0.36, 0.38, 0.42, 1.0), "fog": 0.0045, "sat": 0.9},
 ]
+const INDOOR_AMBIENT := 0.7   # how much of the sky's ambient light reaches a room with a roof
 const DRIFT := 1.5       # cloud speed, m/s
 const SPAN := 260.0      # clouds wrap around after this many metres
 const RAIN_REACH := 18.0 # rain falls within this many metres of the viewer
 const RAIN_TOP := 14.0   # and starts this far above them
 
 var current := -1
+var ambient_base := 0.5   # the weather's ambient energy; _process dims it indoors
+var indoor := 0.0         # 0 outside .. 1 under a roof
 
 var _env: Environment
 var _sky: ProceduralSkyMaterial
@@ -105,7 +108,10 @@ func set_weather(index: int) -> void:
 	tween.tween_property(_sky, "sky_horizon_color", look["horizon"], seconds)
 	tween.tween_property(_sky, "ground_horizon_color", look["horizon"], seconds)
 	tween.tween_property(_sun, "light_energy", look["sun"], seconds)
-	tween.tween_property(_env, "ambient_light_energy", look["ambient"], seconds)
+	tween.tween_property(self, "ambient_base", look["ambient"], seconds)
+	tween.tween_property(_env, "fog_light_color", look["horizon"], seconds)
+	tween.tween_property(_env, "fog_density", look["fog"], seconds)
+	tween.tween_property(_env, "adjustment_saturation", look["sat"], seconds)
 	tween.tween_property(_cloud_mat, "albedo_color", look["cloud"], seconds)
 
 
@@ -117,6 +123,20 @@ func _process(dt: float) -> void:
 	# rain falls in a box around whoever is looking, and only where there is no roof
 	var cam := get_viewport().get_camera_3d()
 	if cam:
+		_update_indoor(cam, dt)
 		_rain.emitting = current == 2
 		_rain.global_position = cam.global_position + Vector3(0, RAIN_TOP, 0)
 		_cover.global_position = cam.global_position + Vector3(0, RAIN_TOP * 0.5 - 3.0, 0)
+
+
+## Rooms are lit by sky ambient too, so under a roof the ambient is dimmed and warmed: one ray
+## straight up from the camera decides whether there is a ceiling overhead.
+func _update_indoor(cam: Camera3D, dt: float) -> void:
+	var from := cam.global_position
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, 4.2, 0))
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	indoor = move_toward(indoor, 1.0 if not hit.is_empty() else 0.0, dt * 2.5)
+	RenderingServer.global_shader_parameter_set("indoor", indoor)
+	_env.ambient_light_energy = ambient_base * lerpf(1.0, INDOOR_AMBIENT, indoor)
+	_env.ambient_light_sky_contribution = lerpf(1.0, 0.5, indoor)
+	_env.ambient_light_color = Color(0.62, 0.45, 0.32)

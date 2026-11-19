@@ -10,6 +10,7 @@ const Town = preload("res://scripts/town.gd")
 const Shapes = preload("res://scripts/shapes.gd")
 const Fixture = preload("res://scripts/fixture.gd")
 const Blob = preload("res://scripts/blob.gd")
+const Materials = preload("res://scripts/materials.gd")
 
 enum { NEIGHBOUR, OURS, GONE }
 
@@ -132,14 +133,15 @@ func _build_shell() -> void:
 	var hd := _d * 0.5
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1000 + id
-	_mats["wall"] = _mat(WALL_COLORS[rng.randi() % WALL_COLORS.size()], 0.85)
-	_mats["roof"] = _mat(ROOF_COLORS[rng.randi() % ROOF_COLORS.size()], 0.7)
-	_mats["inner"] = _mat(Color(0.93, 0.91, 0.86), 0.9)
-	_mats["floor"] = _mat(Color(0.62, 0.45, 0.3), 0.6)
-	_mats["trim"] = _mat(Color(0.97, 0.97, 0.95), 0.6)
-	var glass := _mat(Color(0.7, 0.86, 0.95, 0.35), 0.1)
-	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_mats["glass"] = glass
+	_mats["wall"] = Materials.surface(Materials.PLASTER, WALL_COLORS[rng.randi() % WALL_COLORS.size()])
+	_mats["roof"] = Materials.surface(Materials.ROOF, ROOF_COLORS[rng.randi() % ROOF_COLORS.size()])
+	_mats["inner"] = Materials.surface(Materials.PLASTER, Color(0.93, 0.91, 0.86))
+	_mats["floor"] = Materials.surface(Materials.WOOD, Color(0.62, 0.45, 0.3), false, {"grain": Vector3(1, 0, 0), "plank": 0.16})
+	var trim := _mat(Color(0.97, 0.97, 0.95), 0.45)
+	trim.clearcoat_enabled = true
+	trim.clearcoat = 0.25
+	_mats["trim"] = trim
+	_mats["glass"] = Materials.glass(Color(0.7, 0.86, 0.95, 0.3))
 
 	_shell = Node3D.new()
 	add_child(_shell)

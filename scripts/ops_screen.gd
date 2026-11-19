@@ -9,6 +9,7 @@ func setup(board: SubViewport, width: float, framed: bool) -> void:
 	var picture := StandardMaterial3D.new()
 	picture.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	picture.albedo_texture = board.get_texture()
+	picture.albedo_color = Color(1.3, 1.3, 1.3)   # a bit above white so the tone mapper keeps it bright
 	var quad := QuadMesh.new()
 	quad.size = Vector2(width, height)
 	quad.material = picture
@@ -20,7 +21,9 @@ func setup(board: SubViewport, width: float, framed: bool) -> void:
 	if framed:
 		var frame := StandardMaterial3D.new()
 		frame.albedo_color = Color(0.07, 0.08, 0.1)
-		frame.roughness = 0.4
+		frame.roughness = 0.3
+		frame.clearcoat_enabled = true
+		frame.clearcoat = 0.5
 		add_child(Shapes.instance(Shapes.rounded_box(Vector3(width + 0.12, height + 0.12, 0.08), 0.03, 2), frame, Vector3(0, 0, 0.04)))
 	var spill := OmniLight3D.new()   # a little glow onto whatever stands in front of it
 	spill.light_color = Color(0.5, 0.7, 1.0)

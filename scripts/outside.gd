@@ -21,6 +21,7 @@ extends Node3D
 
 const Town = preload("res://scripts/town.gd")
 const Shapes = preload("res://scripts/shapes.gd")
+const Materials = preload("res://scripts/materials.gd")
 
 const CELL := 150.0
 const GROUND_Y := -0.03
@@ -101,24 +102,23 @@ func _ready() -> void:
 # ================================================================ batching core
 
 func _make_materials() -> void:
-	var vc := StandardMaterial3D.new()
-	vc.vertex_color_use_as_albedo = true
-	vc.vertex_color_is_srgb = true
-	vc.roughness = 0.85
-	_mats["vc"] = vc
-	var glow := vc.duplicate() as StandardMaterial3D
+	# per-instance colour drives every one of these, so objects keep their own colour
+	_mats["vc"] = Materials.surface(Materials.PLAIN, Color.WHITE, true)
+	_mats["foliage"] = Materials.surface(Materials.FOLIAGE, Color.WHITE, true)
+	_mats["lawn"] = Materials.surface(Materials.GRASS, Color.WHITE, true)
+	_mats["asphalt"] = Materials.surface(Materials.ASPHALT, Color.WHITE, true)
+	_mats["walk"] = Materials.surface(Materials.SLABS, Color.WHITE, true)
+	_mats["paint"] = Materials.surface(Materials.PAINT, Color.WHITE, true)
+	var glow := StandardMaterial3D.new()
+	glow.vertex_color_use_as_albedo = true
+	glow.vertex_color_is_srgb = true
+	glow.roughness = 0.5
 	glow.emission_enabled = true
 	glow.emission = Color(1.0, 0.86, 0.55)
-	glow.emission_energy_multiplier = 2.5
+	glow.emission_energy_multiplier = 5.0
 	_mats["glow"] = glow
-	var water := vc.duplicate() as StandardMaterial3D
-	water.roughness = 0.08
-	water.metallic_specular = 0.9
-	_mats["water"] = water
-	var glass := vc.duplicate() as StandardMaterial3D
-	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.roughness = 0.1
-	_mats["glass"] = glass
+	_mats["water"] = Materials.water()
+	_mats["glass"] = Materials.glass(Color.WHITE, true)
 
 
 func _make_kinds() -> void:
@@ -128,6 +128,7 @@ func _make_kinds() -> void:
 	sph.radial_segments = 14
 	sph.rings = 7
 	_kind("sphere", sph)
+	_kind("leaf", sph, "foliage")
 	var small := SphereMesh.new()
 	small.radius = 0.5
 	small.height = 1.0
@@ -153,17 +154,22 @@ func _make_kinds() -> void:
 	cone.radial_segments = 14
 	cone.rings = 1
 	_kind("cone", cone)
+	_kind("pine", cone, "foliage")
 	var tuft := cone.duplicate() as CylinderMesh
 	tuft.radial_segments = 5
 	_kind("tuft", tuft, "vc", false)
 	var box := BoxMesh.new()
 	_kind("flat", box, "vc", false)
+	_kind("asphalt", box, "asphalt", false)
+	_kind("walk", box, "walk", false)
+	_kind("paint", box, "paint", false)
+	_kind("lawn", box, "lawn", false)
 	var hill := SphereMesh.new()
 	hill.radius = 0.5
 	hill.height = 1.0
 	hill.radial_segments = 32
 	hill.rings = 16
-	_kind("hill", hill, "vc", false)
+	_kind("hill", hill, "lawn", false)
 
 
 func _kind(name: String, mesh: Mesh, mat := "vc", shadow := true) -> void:
@@ -283,9 +289,9 @@ func _face_yaw(dir: Vector2) -> float:
 
 
 ## A flat rectangle (x, z rect) whose top face sits at `top`.
-func _slab(rect: Rect2, top: float, col: Color, thick := 0.1) -> void:
+func _slab(rect: Rect2, top: float, col: Color, thick := 0.1, kind := "flat") -> void:
 	var c := rect.get_center()
-	_put("flat", Vector3(c.x, top - thick * 0.5, c.y), Vector3(rect.size.x, thick, rect.size.y), col)
+	_put(kind, Vector3(c.x, top - thick * 0.5, c.y), Vector3(rect.size.x, thick, rect.size.y), col)
 	# Paving sits above the grass, so it needs its own collider: without one, anything put down
 	# on a driveway or sidewalk sinks into it by the height difference.
 	if top > -0.025 and minf(rect.size.x, rect.size.y) > 0.4:
@@ -358,28 +364,28 @@ func _tree(pos: Vector3, kind: int, s: float, collide := true) -> void:
 			_put("cyl", pos + Vector3(0, 0.7 * s, 0), Vector3(0.3, 1.4, 0.3) * s, bark)
 			for k in 4:
 				var w := (2.1 - 0.35 * k) * s
-				_put("sphere", pos + Vector3(_r(-0.1, 0.1) * s, (2.4 + 1.5 * k) * s, _r(-0.1, 0.1) * s), Vector3(w, 2.6 * s, w), _tint(base, 0.06).lightened(0.04 * k))
-			_put("sphere", pos + Vector3(0, 8.2 * s, 0), Vector3(0.9, 1.4, 0.9) * s, base.lightened(0.15))
+				_put("leaf", pos + Vector3(_r(-0.1, 0.1) * s, (2.4 + 1.5 * k) * s, _r(-0.1, 0.1) * s), Vector3(w, 2.6 * s, w), _tint(base, 0.06).lightened(0.04 * k))
+			_put("leaf", pos + Vector3(0, 8.2 * s, 0), Vector3(0.9, 1.4, 0.9) * s, base.lightened(0.15))
 		2:
 			_put("cyl", pos + Vector3(0, 0.8 * s, 0), Vector3(0.36, 1.6, 0.36) * s, bark)
 			var dark := Color(0.14, 0.40, 0.24).lerp(Color(0.22, 0.50, 0.26), _rng.randf())
 			for k in 4:
 				var w := (3.4 - 0.75 * k) * s
 				var y := (1.3 + 1.25 * k) * s
-				_put("cone", pos + Vector3(0, y + 1.2 * s, 0), Vector3(w, 2.4 * s, w), dark.lightened(0.04 * k))
-				_put("sphere", pos + Vector3(0, y + 0.1 * s, 0), Vector3(w * 0.95, 0.9 * s, w * 0.95), dark.darkened(0.05))
-			_put("cone", pos + Vector3(0, 6.6 * s, 0), Vector3(0.7, 1.6, 0.7) * s, dark.lightened(0.14))
+				_put("pine", pos + Vector3(0, y + 1.2 * s, 0), Vector3(w, 2.4 * s, w), dark.lightened(0.04 * k))
+				_put("leaf", pos + Vector3(0, y + 0.1 * s, 0), Vector3(w * 0.95, 0.9 * s, w * 0.95), dark.darkened(0.05))
+			_put("pine", pos + Vector3(0, 6.6 * s, 0), Vector3(0.7, 1.6, 0.7) * s, dark.lightened(0.14))
 		_:
 			_put("cyl", pos + Vector3(0, 1.1 * s, 0), Vector3(0.38, 2.2, 0.38) * s, bark)
 			_put("sphere", pos + Vector3(0, 0.12 * s, 0), Vector3(0.75, 0.45, 0.75) * s, bark)
 			_put("cyl", pos + Vector3(0.3 * s, 2.5 * s, 0.1 * s), Vector3(0.14, 1.1, 0.14) * s, bark, Basis(Vector3.FORWARD, 0.6))
-			_put("sphere", pos + Vector3(0, 3.5 * s, 0), Vector3(3.5, 3.0, 3.5) * s, _tint(base, 0.05))
+			_put("leaf", pos + Vector3(0, 3.5 * s, 0), Vector3(3.5, 3.0, 3.5) * s, _tint(base, 0.05))
 			for k in 4:
 				var a := a0 + k * TAU / 4.0
 				var d := _r(0.9, 1.2) * s
 				var w := _r(2.0, 2.5) * s
-				_put("sphere", pos + Vector3(cos(a) * d, _r(2.8, 3.6) * s, sin(a) * d), Vector3(w, w * 0.85, w), _tint(base, 0.07))
-			_put("sphere", pos + Vector3(_r(-0.3, 0.3) * s, 4.7 * s, _r(-0.3, 0.3) * s), Vector3(2.3, 1.8, 2.3) * s, base.lightened(0.1))
+				_put("leaf", pos + Vector3(cos(a) * d, _r(2.8, 3.6) * s, sin(a) * d), Vector3(w, w * 0.85, w), _tint(base, 0.07))
+			_put("leaf", pos + Vector3(_r(-0.3, 0.3) * s, 4.7 * s, _r(-0.3, 0.3) * s), Vector3(2.3, 1.8, 2.3) * s, base.lightened(0.1))
 			if kind == 3:
 				for k in 5:
 					var a := _r(0.0, TAU)
@@ -396,9 +402,9 @@ func _random_tree(pos: Vector3, s: float, collide := true) -> void:
 
 func _bush(pos: Vector3, s: float, flowering := false) -> void:
 	var c := _tint(_pick(LEAVES).darkened(0.1), 0.06)
-	_put("sphere", pos + Vector3(0, 0.42 * s, 0), Vector3(1.3, 0.95, 1.15) * s, c)
-	_put("sphere", pos + Vector3(0.5 * s, 0.34 * s, 0.2 * s), Vector3(0.85, 0.7, 0.8) * s, c.lightened(0.08))
-	_put("sphere", pos + Vector3(-0.4 * s, 0.32 * s, -0.25 * s), Vector3(0.8, 0.65, 0.8) * s, c.darkened(0.04))
+	_put("leaf", pos + Vector3(0, 0.42 * s, 0), Vector3(1.3, 0.95, 1.15) * s, c)
+	_put("leaf", pos + Vector3(0.5 * s, 0.34 * s, 0.2 * s), Vector3(0.85, 0.7, 0.8) * s, c.lightened(0.08))
+	_put("leaf", pos + Vector3(-0.4 * s, 0.32 * s, -0.25 * s), Vector3(0.8, 0.65, 0.8) * s, c.darkened(0.04))
 	if flowering:
 		var fc := _pick(FLOWERS)
 		for i in 7:
@@ -419,7 +425,7 @@ func _hedge(a: Vector2, b: Vector2, h: float, t: float, gaps: Array[Vector2] = [
 		for k in n:
 			var p := p0 + dir * (k + 0.5) * length / n
 			var hh := h * _r(0.95, 1.18)
-			_put("sphere", Vector3(p.x, hh * 0.46, p.y), Vector3(t * 1.35, hh, t * 1.3), _tint(base, 0.06))
+			_put("leaf", Vector3(p.x, hh * 0.46, p.y), Vector3(t * 1.35, hh, t * 1.3), _tint(base, 0.06))
 		if collide:
 			var mid := (p0 + p1) * 0.5
 			_col_box(Vector3(mid.x, h * 0.5, mid.y), Vector3(length, h, t * 0.85), atan2(-dir.y, dir.x))
@@ -629,12 +635,9 @@ func _car(pos: Vector3, yaw: float, col: Color, sc := 1.0) -> void:
 func _ground() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(1800, 1800)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = GRASS
-	mat.roughness = 1.0
 	var mi := MeshInstance3D.new()
 	mi.mesh = plane
-	mi.material_override = mat
+	mi.material_override = Materials.surface(Materials.GRASS, GRASS)
 	mi.position = Vector3(0, GROUND_Y, 0)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
@@ -655,37 +658,37 @@ func _streets() -> void:
 	for ez: float in Town.STREETS_EW:
 		ew_cuts.append(Vector2(ez, hw + sw))
 	for c: float in Town.STREETS_EW:
-		_slab(Rect2(b.position.x, c - hw, b.size.x, Town.STREET_WIDTH), ASPHALT_TOP, ASPHALT, 0.2)
+		_slab(Rect2(b.position.x, c - hw, b.size.x, Town.STREET_WIDTH), ASPHALT_TOP, ASPHALT, 0.2, "asphalt")
 		for s: float in [-1.0, 1.0]:
 			var cuts: Array[Vector2] = ns_cuts.duplicate()
 			if is_equal_approx(c, 23.5) and s < 0.0:
 				cuts.append(Vector2(0.0, 2.5))   # our driveway crosses this sidewalk
 			for iv in _spans(b.position.x, b.end.x, _sorted(cuts)):
-				_slab(Rect2(iv.x, c + (hw if s > 0.0 else -hw - sw), iv.y - iv.x, sw), WALK_TOP, WALK, 0.2)
+				_slab(Rect2(iv.x, c + (hw if s > 0.0 else -hw - sw), iv.y - iv.x, sw), WALK_TOP, WALK, 0.2, "walk")
 	for c: float in Town.STREETS_NS:
-		_slab(Rect2(c - hw, b.position.y, Town.STREET_WIDTH, b.size.y), ASPHALT_TOP, ASPHALT, 0.2)
+		_slab(Rect2(c - hw, b.position.y, Town.STREET_WIDTH, b.size.y), ASPHALT_TOP, ASPHALT, 0.2, "asphalt")
 		for s: float in [-1.0, 1.0]:
 			for iv in _spans(b.position.y, b.end.y, _sorted(ew_cuts.duplicate())):
-				_slab(Rect2(c + (hw if s > 0.0 else -hw - sw), iv.x, sw, iv.y - iv.x), WALK_TOP, WALK, 0.2)
+				_slab(Rect2(c + (hw if s > 0.0 else -hw - sw), iv.x, sw, iv.y - iv.x), WALK_TOP, WALK, 0.2, "walk")
 	# centre dashes, zebra crossings
 	for c: float in Town.STREETS_EW:
 		var x := b.position.x + 3.0
 		while x < b.end.x - 3.0:
 			if _far_from(x, Town.STREETS_NS, 8.5):
-				_slab(Rect2(x - 1.2, c - 0.07, 2.4, 0.14), -0.004, LINE_YELLOW, 0.01)
+				_slab(Rect2(x - 1.2, c - 0.07, 2.4, 0.14), -0.004, LINE_YELLOW, 0.01, "paint")
 			x += 5.4
 	for c: float in Town.STREETS_NS:
 		var z := b.position.y + 3.0
 		while z < b.end.y - 3.0:
 			if _far_from(z, Town.STREETS_EW, 8.5):
-				_slab(Rect2(c - 0.07, z - 1.2, 0.14, 2.4), -0.004, LINE_YELLOW, 0.01)
+				_slab(Rect2(c - 0.07, z - 1.2, 0.14, 2.4), -0.004, LINE_YELLOW, 0.01, "paint")
 			z += 5.4
 	for ez: float in Town.STREETS_EW:
 		for sx: float in Town.STREETS_NS:
 			for d: float in [-1.0, 1.0]:
 				for k in range(-3, 4):
-					_slab(Rect2(sx + d * 5.8 - 1.5, ez + k - 0.27, 3.0, 0.54), -0.004, LINE_WHITE, 0.01)
-					_slab(Rect2(sx + k - 0.27, ez + d * 5.8 - 1.5, 0.54, 3.0), -0.004, LINE_WHITE, 0.01)
+					_slab(Rect2(sx + d * 5.8 - 1.5, ez + k - 0.27, 3.0, 0.54), -0.004, LINE_WHITE, 0.01, "paint")
+					_slab(Rect2(sx + k - 0.27, ez + d * 5.8 - 1.5, 0.54, 3.0), -0.004, LINE_WHITE, 0.01, "paint")
 	# manhole covers
 	for c: float in Town.STREETS_EW:
 		for i in 4:
@@ -809,15 +812,15 @@ func _bus_stop(pos: Vector3, yaw: float) -> void:
 func _home() -> void:
 	var h := Town.HOME
 	# driveway across the sidewalk to the street, with joints
-	_slab(Rect2(-2.5, 4.5, 5.0, 15.9), 0.0, Color(0.72, 0.70, 0.66), 0.06)
+	_slab(Rect2(-2.5, 4.5, 5.0, 15.9), 0.0, Color(0.72, 0.70, 0.66), 0.06, "walk")
 	for z in range(1, 6):
 		_slab(Rect2(-2.5, 4.5 + z * 2.6, 5.0, 0.05), 0.002, Color(0.52, 0.50, 0.47), 0.01)
 	# front path to the door (-14, 6)
-	_slab(Rect2(-14.7, 6.0, 1.4, 12.0), 0.0, PAVING, 0.06)
-	_slab(Rect2(-15.4, 6.0, 2.8, 0.9), 0.0, PAVING.darkened(0.04), 0.06)
+	_slab(Rect2(-14.7, 6.0, 1.4, 12.0), 0.0, PAVING, 0.06, "walk")
+	_slab(Rect2(-15.4, 6.0, 2.8, 0.9), 0.0, PAVING.darkened(0.04), 0.06, "walk")
 	# lighter lawns: the open east lawn and the main front/west lawn
-	_slab(Rect2(h.position.x, h.position.y, 48.0, 45.0), LAWN_TOP, GRASS.lerp(Color(0.5, 0.74, 0.32), 0.3), 0.02)
-	_slab(Rect2(6.0, -12.0, 8.0, 28.0), LAWN_TOP + 0.004, Color(0.48, 0.72, 0.31), 0.02)
+	_slab(Rect2(h.position.x, h.position.y, 48.0, 45.0), LAWN_TOP, GRASS.lerp(Color(0.5, 0.74, 0.32), 0.3), 0.02, "lawn")
+	_slab(Rect2(6.0, -12.0, 8.0, 28.0), LAWN_TOP + 0.004, Color(0.48, 0.72, 0.31), 0.02, "lawn")
 	# boundary: front hedges with gaps for the path and driveway, west and north hedges
 	var front_a := Vector2(-33.4, 17.3)
 	_hedge(front_a, Vector2(-15.4, 17.3), 0.8, 0.8)
@@ -873,7 +876,7 @@ func _garden() -> void:
 			_putl(gh, "cyl", Vector3(px, 1.1, pz), Vector3(0.1, 2.2, 0.1), Color(0.9, 0.9, 0.86))
 	_rbl(gh, Vector3(0, 0.75, -1.1), Vector3(3.0, 0.9, 0.7), 0.08, WOOD)
 	for i in 8:
-		_put("sphere", gh * Vector3(-1.3 + i * 0.37, 1.3, -1.1), Vector3.ONE * _r(0.25, 0.4), _pick(LEAVES))
+		_put("leaf", gh * Vector3(-1.3 + i * 0.37, 1.3, -1.1), Vector3.ONE * _r(0.25, 0.4), _pick(LEAVES))
 	_col_box(Vector3(-6.0, 1.2, -21.5), Vector3(4.2, 2.4, 3.2))
 	# shed (-28.5, -22.5), door facing the garden
 	var sh := _xf(Vector3(-28.5, 0, -22.5), 0.0)
@@ -889,7 +892,7 @@ func _garden() -> void:
 		for i in 6:
 			var px := -29.9 + i * 0.56
 			if r == 0:
-				_put("sphere", Vector3(px, 0.34, bz), Vector3(0.4, 0.3, 0.4), Color(0.55, 0.78, 0.4))
+				_put("leaf", Vector3(px, 0.34, bz), Vector3(0.4, 0.3, 0.4), Color(0.55, 0.78, 0.4))
 			elif r == 1:
 				_put("tuft", Vector3(px, 0.4, bz), Vector3(0.22, 0.4, 0.22), Color(0.3, 0.62, 0.25))
 				_put("cone", Vector3(px, 0.2, bz), Vector3(0.12, 0.14, 0.12), Color(0.95, 0.5, 0.1), Basis(Vector3.RIGHT, PI))
@@ -938,7 +941,7 @@ func _yard(lot: Dictionary) -> void:
 	var fp: Vector2 = Town.FOOTPRINTS[sz]
 	var door_v := 17.0 - fp.y * 0.5
 	var toward := y.yaw(true)
-	_slab(y.rect(-11.95, 0.6, 11.95, 33.95), LAWN_TOP, _tint(GRASS.lerp(Color(0.48, 0.72, 0.3), _r(0.0, 0.6)), 0.03), 0.02)
+	_slab(y.rect(-11.95, 0.6, 11.95, 33.95), LAWN_TOP, _tint(GRASS.lerp(Color(0.48, 0.72, 0.3), _r(0.0, 0.6)), 0.03), 0.02, "lawn")
 	var has_drive := _rng.randf() < 0.4
 	var drive_u := 6.0 * (1.0 if _rng.randf() < 0.5 else -1.0)
 	# borders: sides and back
@@ -980,17 +983,17 @@ func _yard(lot: Dictionary) -> void:
 	# path from the door to the sidewalk, and the doorstep
 	var path_col := [PAVING, Color(0.72, 0.5, 0.4), Color(0.62, 0.62, 0.65), Color(0.66, 0.5, 0.34)][_rng.randi() % 4] as Color
 	if _rng.randf() < 0.6:
-		_slab(y.rect(-0.7, 0.5, 0.7, door_v), 0.0, path_col, 0.06)
+		_slab(y.rect(-0.7, 0.5, 0.7, door_v), 0.0, path_col, 0.06, "walk")
 	else:
 		var v := 1.0
 		while v < door_v:
 			_disc(y.p2(_r(-0.15, 0.15), v), Vector2(_r(0.9, 1.1), _r(0.6, 0.75)), 0.0, _tint(path_col, 0.04), 0.06, _r(-0.2, 0.2))
 			v += 1.0
-	_slab(y.rect(-1.4, door_v - 0.9, 1.4, door_v), 0.0, path_col.darkened(0.05), 0.06)
+	_slab(y.rect(-1.4, door_v - 0.9, 1.4, door_v), 0.0, path_col.darkened(0.05), 0.06, "walk")
 	_mailbox(y.p(_r(2.2, 4.0) * (1.0 if _rng.randf() < 0.5 else -1.0), 0.5), toward)
 	# optional driveway pad with a car (the front yard is only ~4 m deep, so the car is a little small)
 	if has_drive:
-		_slab(y.rect(drive_u - 1.7, 0.5, drive_u + 1.7, 4.9), 0.0, Color(0.7, 0.68, 0.64), 0.06)
+		_slab(y.rect(drive_u - 1.7, 0.5, drive_u + 1.7, 4.9), 0.0, Color(0.7, 0.68, 0.64), 0.06, "walk")
 		if _rng.randf() < 0.8:
 			_car(y.p(drive_u, 2.7), toward + (PI if _rng.randf() < 0.5 else 0.0), _pick(CAR_COLORS), 0.9)
 	# front yard decoration
@@ -1104,7 +1107,7 @@ func _dish(pos: Vector3) -> void:
 
 func _park() -> void:
 	var pk := Town.PARK
-	_slab(pk, LAWN_TOP, GRASS.lerp(Color(0.5, 0.75, 0.32), 0.4), 0.02)
+	_slab(pk, LAWN_TOP, GRASS.lerp(Color(0.5, 0.75, 0.32), 0.4), 0.02, "lawn")
 	_park_lobes = [Vector4(4.0, 50.0, 8.0, 5.5), Vector4(-2.0, 47.0, 5.0, 4.0), Vector4(12.0, 52.0, 5.5, 4.5)] as Array[Vector4]
 	_pond(_park_lobes, 22, 12)
 	_rocks(Vector2(4.0, 49.0), 4, 1.0, 0.7)
@@ -1357,7 +1360,7 @@ func _bounds() -> void:
 	while t < perimeter:
 		var p := _perimeter(t, -1.8)
 		var w := _r(3.6, 5.0)
-		_put("sphere", Vector3(p.x, w * 0.4, p.y), Vector3(w, w * _r(0.9, 1.3), w), _tint(Color(0.18, 0.46, 0.2), 0.08))
+		_put("leaf", Vector3(p.x, w * 0.4, p.y), Vector3(w, w * _r(0.9, 1.3), w), _tint(Color(0.18, 0.46, 0.2), 0.08))
 		t += 2.6
 	# outer rows of conifers, poplars and round trees (no colliders: nobody gets there)
 	for row in 3:

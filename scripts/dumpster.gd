@@ -15,7 +15,11 @@ var fixtures: Dictionary = {}
 func _ready() -> void:
 	var paint := StandardMaterial3D.new()
 	paint.albedo_color = Color(0.13, 0.36, 0.24)
-	paint.roughness = 0.6
+	paint.roughness = 0.42
+	paint.metallic = 0.2
+	paint.clearcoat_enabled = true
+	paint.clearcoat = 0.5
+	paint.clearcoat_roughness = 0.2
 	var dark := StandardMaterial3D.new()
 	dark.albedo_color = Color(0.08, 0.2, 0.14)
 	dark.roughness = 0.8
