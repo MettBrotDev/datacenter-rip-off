@@ -1,43 +1,67 @@
 extends Node3D
-## The running game: level, players and items. The host owns all item state.
+## The running game: level, players, items, cables and the company's numbers.
+## The host owns all state; clients send requests and receive replicated results.
 ##
 ## Naming: request_*  = called locally by gameplay code
-##         _h_*       = runs on the host (validates a client's request)
+##         _h_*       = runs on the host (validates a request)
 ##         _r_*       = replicated result, runs on every peer
 
 const Player = preload("res://scripts/player.gd")
 const Item = preload("res://scripts/item.gd")
 const Garage = preload("res://scripts/garage.gd")
 const Hud = preload("res://scripts/hud.gd")
+const Cables = preload("res://scripts/cables.gd")
+const Sim = preload("res://scripts/sim.gd")
+const Catalog = preload("res://scripts/catalog.gd")
+const UI = preload("res://scripts/ui.gd")
 const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3(1.5, 0, 2), Vector3(0, 0, 1)]
+const DELIVERY := Vector3(2.6, 1.0, 1.8)   # next to the roller door
+const SIM_STEP := 0.5
 
-var items: Dictionary = {}      # item id -> Item
+var items: Dictionary = {}      # item id (> 0) -> Item
+var fixtures: Dictionary = {}   # fixture id (< 0) -> Fixture
 var hud: CanvasLayer
 var ready_peers: Array = []     # host only: clients that have loaded the world
+var preview: Dictionary = {}    # cable end the local player is carrying: {"id", "type"}
+var money := 0.0
+var tokens := 0.0
+var watts := 0.0
+var tripped := false
 
 var _players: Node3D
 var _items: Node3D
+var _sim: Sim                   # host only
 var _next_id := 1
 var _tick := 0
+var _sim_t := 0.0
 
 
 func _ready() -> void:
-	add_child(Garage.new())
+	var garage := Garage.new()
+	add_child(garage)
+	fixtures = garage.fixtures
 	_players = Node3D.new()
 	_players.name = "Players"
 	add_child(_players)
 	_items = Node3D.new()
 	_items.name = "Items"
 	add_child(_items)
+	var cables := Cables.new()
+	cables.world = self
+	add_child(cables)
 	hud = Hud.new()
 	add_child(hud)
 	Net.players_changed.connect(_reconcile_players)
 	_reconcile_players()
 	if multiplayer.is_server():
+		_sim = Sim.new()
 		_spawn_starting_items()
+		_sim_step(0.0)
 	else:
 		_h_snapshot.rpc_id(1)
 
+
+# --- queries (valid on every peer) -------------------------------------------
 
 func player(id: int) -> Player:
 	return _players.get_node_or_null(str(id))
@@ -50,6 +74,38 @@ func held_by(peer: int) -> Item:
 	return null
 
 
+## Whatever a cable can be plugged into: an item (id > 0) or a fixture (id < 0).
+func provider(id: int) -> Node3D:
+	return items.get(id) if id > 0 else fixtures.get(id)
+
+
+func sockets_used(provider_id: int, type: String) -> int:
+	var n := 0
+	for it: Item in items.values():
+		if it.link(type) == provider_id:
+			n += 1
+	return n
+
+
+func can_attach(child: Item, par: Item) -> bool:
+	if par == child or not par.def.has("slots"):
+		return false
+	return par.def["slots"]["accepts"] == child.def.get("group", "") and _free_slot(par) >= 0
+
+
+func debug_dump() -> String:
+	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f tripped=%s" % [
+		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, tripped]
+	for p: Player in _players.get_children():
+		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
+	for it: Item in items.values():
+		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d" % [
+			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status]
+	return out
+
+
+# --- requests ---------------------------------------------------------------
+
 func request_grab(id: int) -> void:
 	_to_host(&"_h_grab", [id])
 
@@ -58,20 +114,27 @@ func request_release(throw: bool) -> void:
 	_to_host(&"_h_release", [throw])
 
 
-func debug_dump() -> String:
-	var out := "PROBE peer=%d players=%s" % [multiplayer.get_unique_id(), Net.players.keys()]
-	for p: Player in _players.get_children():
-		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
-	for it: Item in items.values():
-		out += "\n  item %d %s at %.1v holder=%d" % [it.id, it.kind, it.position, it.holder]
-	return out
+func request_attach(parent_id: int) -> void:
+	_to_host(&"_h_attach", [parent_id])
 
 
-# --- players ---------------------------------------------------------------
+## provider_id 0 = unplug.
+func request_link(id: int, type: String, provider_id: int) -> void:
+	_to_host(&"_h_link", [id, type, provider_id])
+
+
+func request_buy(kind: String) -> void:
+	_to_host(&"_h_buy", [kind])
+
+
+func request_breaker() -> void:
+	_to_host(&"_h_breaker", [])
+
+
+# --- players ----------------------------------------------------------------
 
 func _reconcile_players() -> void:
 	var ids := Net.players.keys()
-	ids.sort()
 	for id: int in ids:
 		if player(id) == null:
 			var p := Player.new()
@@ -90,15 +153,33 @@ func _reconcile_players() -> void:
 	hud.set_players(Net.players)
 
 
-# --- items: host side --------------------------------------------------------
+func _name(peer: int) -> String:
+	return Net.players.get(peer, {}).get("name", "Someone")
+
+
+# --- host: handlers -----------------------------------------------------------
 
 func _spawn_starting_items() -> void:
-	var pile := ["crate", "crate", "crate", "server", "server", "gpu", "gpu", "gpu", "powerstrip", "powerstrip"]
+	var pile := ["server", "gpu_1080", "powerstrip", "crate", "crate"]
 	for i in pile.size():
-		var pos := Vector3(randf_range(-1.2, 1.2), 0.4 + i * 0.25, randf_range(-1.6, -0.4))
-		var xf := Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos)
-		_cast(&"_r_spawn", [_next_id, pile[i], xf, 0])
-		_next_id += 1
+		var pos := Vector3(randf_range(-1.0, 1.0), 0.4 + i * 0.3, randf_range(-1.4, -0.4))
+		_spawn(pile[i], Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos))
+
+
+func _spawn(kind: String, xf: Transform3D) -> void:
+	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0]])
+	_next_id += 1
+
+
+func _free_slot(par: Item) -> int:
+	var used := {}
+	for it: Item in items.values():
+		if it.parent == par.id:
+			used[it.slot] = true
+	for s in par.def["slots"]["at"].size():
+		if not used.has(s):
+			return s
+	return -1
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -107,8 +188,10 @@ func _h_snapshot() -> void:
 		return
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
-		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform, it.holder)
+		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to])
 	ready_peers.append(peer)
+	_sim_step(0.0)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -120,7 +203,7 @@ func _h_grab(id: int) -> void:
 	var p := player(peer)
 	if it == null or p == null or it.holder != 0 or held_by(peer) != null:
 		return
-	if p.position.distance_to(it.position) > 5.0:
+	if p.position.distance_to(it.global_position) > 5.0:
 		return
 	_cast(&"_r_hold", [id, peer])
 
@@ -149,42 +232,122 @@ func _h_release(throw: bool) -> void:
 	_cast(&"_r_release", [it.id, xf, vel])
 
 
-func _physics_process(_dt: float) -> void:
+@rpc("any_peer", "call_remote", "reliable")
+func _h_attach(parent_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var it := held_by(Net.sender())
+	var par: Item = items.get(parent_id)
+	if it == null or par == null or not can_attach(it, par):
+		return
+	_cast(&"_r_attach", [it.id, parent_id, _free_slot(par)])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_link(id: int, type: String, provider_id: int) -> void:
+	if not multiplayer.is_server() or type not in ["power", "net"]:
+		return
+	var it: Item = items.get(id)
+	if it == null or not it.def.get(type + "_port", false):
+		return
+	if provider_id != 0:
+		var target := provider(provider_id)
+		if target == null or target.provides != type:
+			return
+		if sockets_used(provider_id, type) >= target.sockets:
+			return
+		if it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
+			return
+		if provider_id == id:   # allowed. It just doesn't do anything useful.
+			_cast(&"_r_toast", ["%s plugged a %s into itself" % [_name(Net.sender()), it.label.to_lower()]])
+	_cast(&"_r_link", [id, type, provider_id])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_buy(kind: String) -> void:
+	if not multiplayer.is_server() or kind not in Catalog.SHOP:
+		return
+	var def: Dictionary = Catalog.ITEMS[kind]
+	if _sim.money < def["price"]:
+		return
+	_sim.money -= def["price"]
+	var pos := DELIVERY + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.3, 0.3))
+	_spawn(kind, Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos))
+	_cast(&"_r_toast", ["%s bought %s (-%s)" % [_name(Net.sender()), def["label"], UI.money(def["price"])]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_breaker() -> void:
+	if not multiplayer.is_server() or not _sim.tripped:
+		return
+	_sim.reset_breaker()
+	_cast(&"_r_toast", ["%s reset the breaker" % _name(Net.sender())])
+	_sim_step(0.0)
+
+
+# --- host: ticking -------------------------------------------------------------
+
+func _physics_process(dt: float) -> void:
 	if not multiplayer.is_server():
 		return
 	for it: Item in items.values():   # safety net: anything that escapes the level comes back
-		if it.holder == 0 and it.position.y < -5.0:
+		if it.is_loose() and it.position.y < -5.0:
 			_cast(&"_r_release", [it.id, Transform3D(Basis(), Vector3(0, 1.5, 0)), Vector3.ZERO])
-	if ready_peers.is_empty():
-		return
+	_sim_t += dt
+	if _sim_t >= SIM_STEP:
+		_sim_t -= SIM_STEP
+		_sim_step(SIM_STEP)
 	_tick += 1
-	if _tick % 3 != 0:
+	if _tick % 3 != 0 or ready_peers.is_empty():
 		return
 	var batch := []
 	for it: Item in items.values():
-		if it.holder == 0 and not it.sleeping:
+		if it.is_loose() and not it.sleeping:
 			batch.append_array([it.id, it.position, it.quaternion])
 	if not batch.is_empty():
 		for peer: int in ready_peers:
 			_r_items.rpc_id(peer, batch)
 
 
+func _sim_step(dt: float) -> void:
+	for it: Item in items.values():   # cables only stretch so far
+		for type: String in ["power", "net"]:
+			var to := it.link(type)
+			if to == 0:
+				continue
+			var target := provider(to)
+			if target == null or it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
+				_cast(&"_r_link", [it.id, type, 0])
+				_cast(&"_r_toast", ["The %s cable of a %s got yanked out" % [
+					"power" if type == "power" else "network", it.label.to_lower()]])
+	var events: Array = []
+	var status := _sim.step(self, dt, events)
+	for text: String in events:
+		_cast(&"_r_toast", [text])
+	_cast(&"_r_sim", [_sim.money, _sim.tokens, _sim.watts, _sim.tripped, status])
+
+
 func _on_item_sleep(it: Item) -> void:
-	if it.sleeping and it.holder == 0:   # final exact resting pose, reliably
+	if it.sleeping and it.is_loose():   # final exact resting pose, reliably
 		for peer: int in ready_peers:
 			_r_rest.rpc_id(peer, it.id, it.position, it.quaternion)
 
 
-# --- items: replicated -------------------------------------------------------
+# --- replicated ------------------------------------------------------------------
 
 @rpc("authority", "call_remote", "reliable")
-func _r_spawn(id: int, kind: String, xf: Transform3D, holder: int) -> void:
+func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	var it := Item.new()
 	it.setup(id, kind)
 	it.name = str(id)
+	it.holder = st[0]
+	it.parent = st[1]
+	it.slot = st[2]
+	it.power_to = st[3]
+	it.net_to = st[4]
 	_items.add_child(it)
 	it.global_transform = xf
-	it.set_holder(holder)
 	items[id] = it
 	if multiplayer.is_server():
 		it.sleeping_state_changed.connect(_on_item_sleep.bind(it))
@@ -194,7 +357,9 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, holder: int) -> void:
 func _r_hold(id: int, peer: int) -> void:
 	var it: Item = items.get(id)
 	if it:
-		it.set_holder(peer)
+		it.parent = 0
+		it.holder = peer
+		it.apply_mode()
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -204,22 +369,59 @@ func _r_release(id: int, xf: Transform3D, vel: Vector3) -> void:
 		it.release(xf, vel)
 
 
+@rpc("authority", "call_remote", "reliable")
+func _r_attach(id: int, parent_id: int, slot: int) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.holder = 0
+		it.parent = parent_id
+		it.slot = slot
+		it.apply_mode()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_link(id: int, type: String, provider_id: int) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.set_link(type, provider_id)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_sim(p_money: float, p_tokens: float, p_watts: float, p_tripped: bool, status: Dictionary) -> void:
+	money = p_money
+	tokens = p_tokens
+	watts = p_watts
+	tripped = p_tripped
+	for id: int in status:
+		var it: Item = items.get(id)
+		if it:
+			it.set_status(status[id])
+	for f: Node3D in fixtures.values():
+		f.set_tripped(tripped)
+	hud.set_stats(money, tokens, watts, tripped)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_toast(text: String) -> void:
+	hud.toast(text)
+
+
 @rpc("authority", "call_remote", "unreliable_ordered")
 func _r_items(batch: Array) -> void:
 	for i in range(0, batch.size(), 3):
 		var it: Item = items.get(batch[i])
-		if it and it.holder == 0:
+		if it and it.is_loose():
 			it.net_target(batch[i + 1], batch[i + 2])
 
 
 @rpc("authority", "call_remote", "reliable")
 func _r_rest(id: int, pos: Vector3, rot: Quaternion) -> void:
 	var it: Item = items.get(id)
-	if it and it.holder == 0:
+	if it and it.is_loose():
 		it.net_target(pos, rot)
 
 
-# --- rpc helpers -------------------------------------------------------------
+# --- rpc helpers ---------------------------------------------------------------
 
 ## Host: run a replicated method here and on every client that has the world loaded.
 func _cast(method: StringName, args: Array) -> void:

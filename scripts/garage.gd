@@ -1,11 +1,15 @@
 extends Node3D
 ## The starting location: a brick garage, 9 x 7 m. Built entirely from code.
 
+const Fixture = preload("res://scripts/fixture.gd")
 const W := 9.0
 const D := 7.0
 const H := 3.0
 
+var fixtures: Dictionary = {}   # fixture id -> Fixture
+
 var _body: StaticBody3D
+var _env: Environment
 
 
 func _ready() -> void:
@@ -49,12 +53,29 @@ func _ready() -> void:
 		for x: float in [W / 2 - 0.5, W / 2 - 0.04]:
 			_box(Vector3(0.04, 1.9, 0.04), Vector3(x, 0.95, z), metal, false)
 
+	# things players interact with (ids are fixed: host and clients must agree)
+	_fixture(-1, "outlet", Vector3(-W / 2, 0.4, 1.6), 90)
+	_fixture(-2, "outlet", Vector3(W / 2, 0.4, 0.6), -90)
+	_fixture(-3, "router", Vector3(1.6, 1.5, -D / 2), 0)
+	_fixture(-4, "breaker", Vector3(-2.4, 1.45, -D / 2), 0)
+	_fixture(-5, "shop", Vector3(-W / 2 + 0.38, 0.93, -1.0), 90)
+
 	_lamp(Vector3(-2.2, H, 0.3), true)
 	_lamp(Vector3(2.2, H, 0.3), false)
 
 
+func _fixture(id: int, kind: String, pos: Vector3, yaw: float) -> void:
+	var f := Fixture.new()
+	f.setup(id, kind)
+	f.position = pos
+	f.rotation.y = deg_to_rad(yaw)
+	add_child(f)
+	fixtures[id] = f
+
+
 func _environment() -> void:
 	var env := Environment.new()
+	_env = env
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.02, 0.02, 0.03)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -68,6 +89,15 @@ func _environment() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	var settings := get_node_or_null("/root/Settings")
+	if settings:
+		settings.changed.connect(_apply_settings.bind(settings))
+		_apply_settings(settings)
+
+
+func _apply_settings(settings: Node) -> void:
+	_env.glow_enabled = settings.glow
+	_env.ssao_enabled = settings.ssao
 
 
 func _lamp(top: Vector3, shadows: bool) -> void:

@@ -1,4 +1,4 @@
-# Rack & Ruin
+# Datacenter Rip Off
 
 First-person co-op (2–4 players) datacenter tycoon in the spirit of "DataCenter Tycoon" (Steam),
 but janky and chaotic: the game never blocks a stupid setup, it simulates the consequences.
@@ -18,18 +18,29 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - `scripts/world.gd` — level, players, items; all item state is host-authoritative
   (`request_*` local call, `_h_*` host handler, `_r_*` replicated result)
 - `scripts/player.gd`, `blob.gd` — first-person controller and the blob body
-- `scripts/item.gd` — carryable physics objects (data table `KINDS`)
-- `scripts/garage.gd` — first location; `scripts/hud.gd`, `menu.gd`, `ui.gd` — UI
+- `scripts/catalog.gd` — ALL game data: item kinds, shop list, prices, economy constants
+- `scripts/item.gd` — physical objects: loose / held / attached-in-a-slot, plus power and net cable links
+- `scripts/fixture.gd` — wall outlets, internet uplink, breaker box, shop laptop (negative ids)
+- `scripts/sim.gd` — host-only power/network/money simulation, 2 steps per second
+- `scripts/cables.gd` — draws cables (visual only)
+- `scripts/garage.gd` — first location; `hud.gd`, `shop.gd`, `menu.gd`, `ui.gd` — UI
+- `scripts/settings.gd` (autoload `Settings`, saved to user://options.cfg), `settings_menu.gd`
+
+## Core rules of the simulation
+- Power and network are chains of cables: item -> provider -> ... -> wall fixture. Loops are allowed and simply dead.
+- Nothing is validated at build time except socket counts and cable length (7 m, then it gets yanked out).
+- Garage circuit: 3600 W. Over that for 1.5 s trips the breaker; a player resets it at the box.
+- Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
 
 ## Testing (always do this after changes)
-Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--probe=SECONDS`, `--shot=PATH`.
+Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
 - Script errors + logic: `godot_console --headless --path . -- --host --bot --probe=4`
 - Sync: run a headless `--host --probe=9` in the background, then a `--join --bot --probe=7`; the two dumps must match.
 - Visuals: headless host + windowed `--join --shot=file.png`, then look at the image.
 
 ## Milestones
 1. DONE — walk around together, carry and throw objects
-2. Core loop: racks, hardware, hand-wired power/cooling/network, money
+2. MOSTLY DONE — shop, racks, servers, GPUs, power + network cables, breaker, money. Missing: cooling
 3. Chaos: heat, breakers, leaks, network loops, trip-over cables, sketchy used hardware
 4. Company layer: products, AI models, shop, progression, bigger locations
 5. Polish: glow, sound, UI, balance

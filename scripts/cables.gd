@@ -1,0 +1,93 @@
+extends Node3D
+## Draws every plugged-in cable as a sagging chain of segments, plus the cable end the
+## local player is currently carrying. Purely visual; the data lives on the items.
+
+const SEGMENTS := 10
+
+var world: Node3D
+
+var _pool: Dictionary = {}     # key -> {"node": Node3D, "a": Vector3, "b": Vector3}
+var _mesh: CylinderMesh
+var _mats: Dictionary = {}
+
+
+func _ready() -> void:
+	_mesh = CylinderMesh.new()
+	_mesh.top_radius = 1.0
+	_mesh.bottom_radius = 1.0
+	_mesh.height = 1.0
+	_mesh.radial_segments = 6
+	_mesh.rings = 0
+	_mats["power"] = _mat(Color(0.07, 0.07, 0.08))
+	_mats["net"] = _mat(Color(0.1, 0.75, 0.35))
+
+
+func _process(_dt: float) -> void:
+	var seen := {}
+	for it: Node3D in world.items.values():
+		for type: String in ["power", "net"]:
+			var to: int = it.link(type)
+			var target: Node3D = world.provider(to) if to != 0 else null
+			if target:
+				var key := "%d%s" % [it.id, type]
+				seen[key] = true
+				_draw(key, type, it.port_pos(type), _socket_pos(target, it.id))
+	if not world.preview.is_empty():
+		var src: Node3D = world.items.get(world.preview["id"])
+		var me: Node3D = world.player(multiplayer.get_unique_id())
+		if src and me:
+			seen["preview"] = true
+			_draw("preview", world.preview["type"], src.port_pos(world.preview["type"]), me.hand.global_position)
+	for key: String in _pool.keys():
+		if not seen.has(key):
+			_pool[key]["node"].queue_free()
+			_pool.erase(key)
+
+
+## Spread plugs a little so several cables into one provider do not overlap exactly.
+func _socket_pos(target: Node3D, plug_id: int) -> Vector3:
+	var spread := (float(plug_id % 4) - 1.5) * 0.04
+	return target.global_transform * Vector3(spread, 0.02, 0.03)
+
+
+func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
+	var entry: Dictionary = _pool.get(key, {})
+	if entry.is_empty():
+		var node := Node3D.new()
+		add_child(node)
+		for i in SEGMENTS:
+			var seg := MeshInstance3D.new()
+			seg.mesh = _mesh
+			seg.material_override = _mats[type]
+			node.add_child(seg)
+		entry = {"node": node, "a": Vector3.INF, "b": Vector3.INF}
+		_pool[key] = entry
+	if entry["a"].is_equal_approx(a) and entry["b"].is_equal_approx(b):
+		return
+	entry["a"] = a
+	entry["b"] = b
+	var radius := 0.014 if type == "power" else 0.01
+	var sag := 0.2 + a.distance_to(b) * 0.15
+	var low := minf(0.02, minf(a.y, b.y))
+	var prev := a
+	for i in SEGMENTS:
+		var t := float(i + 1) / SEGMENTS
+		var p := a.lerp(b, t)
+		p.y = maxf(p.y - sag * 4.0 * t * (1.0 - t), low)
+		var d := p - prev
+		var length := maxf(d.length(), 0.001)
+		var y := d / length
+		var x := y.cross(Vector3.FORWARD)
+		if x.length() < 0.01:
+			x = y.cross(Vector3.RIGHT)
+		x = x.normalized()
+		var seg: MeshInstance3D = entry["node"].get_child(i)
+		seg.transform = Transform3D(Basis(x * radius, y * length, x.cross(y) * radius), (prev + p) * 0.5)
+		prev = p
+
+
+func _mat(color: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.roughness = 0.55
+	return m

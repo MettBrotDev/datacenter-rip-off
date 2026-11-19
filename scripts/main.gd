@@ -6,6 +6,7 @@ extends Node
 ##   --name=X               player name
 ##   --bot                  local player walks, grabs and throws on its own
 ##   --yaw=DEG              initial facing of the local player
+##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
 ##   --shot=PATH            save a screenshot after ~2.5 s, then quit
 
@@ -27,7 +28,7 @@ func _ready() -> void:
 
 func _setup_input() -> void:
 	var keys := {"fwd": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G}
 	for action: String in keys:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = keys[action]
@@ -70,6 +71,8 @@ func _handle_args() -> void:
 		Net.host()
 	elif args.has("join"):
 		Net.join(args["join"] if args["join"] != "" else "127.0.0.1")
+	if args.has("selftest"):
+		_selftest()
 	if args.has("probe"):
 		await get_tree().create_timer(float(args["probe"])).timeout
 		print(world.debug_dump() if world else "PROBE no world")
@@ -79,3 +82,24 @@ func _handle_args() -> void:
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(args["shot"])
 		get_tree().quit()
+
+
+## GPU onto server, strip into the wall, server into the strip and the router,
+## then buy a rack and mount the server in it.
+func _selftest() -> void:
+	await get_tree().create_timer(1.5).timeout
+	var by_kind := {}
+	for it: Node3D in world.items.values():
+		by_kind[it.kind] = it
+	var server: Node3D = by_kind["server"]
+	world.request_grab(by_kind["gpu_1080"].id)
+	world.request_attach(server.id)
+	world.request_link(by_kind["powerstrip"].id, "power", -1)
+	world.request_link(server.id, "power", by_kind["powerstrip"].id)
+	world.request_link(server.id, "net", -3)
+	world.request_buy("rack")
+	await get_tree().create_timer(1.0).timeout
+	for it: Node3D in world.items.values():
+		if it.kind == "rack":
+			world.request_grab(server.id)
+			world.request_attach(it.id)

@@ -31,7 +31,7 @@ func _ready() -> void:
 	v.add_theme_constant_override("separation", 12)
 	card.add_child(v)
 
-	v.add_child(UI.label("RACK & RUIN", 40))
+	v.add_child(UI.label("DATACENTER RIP OFF", 36))
 	v.add_child(UI.label("A datacenter. What could go wrong.", 16, UI.DIM))
 	v.add_child(_gap(8))
 	v.add_child(UI.label("NAME", 13, UI.DIM))
@@ -66,6 +66,14 @@ func _ready() -> void:
 	join.custom_minimum_size.x = 100
 	join.pressed.connect(_join)
 	join_row.add_child(join)
+
+	if ResourceLoader.exists("res://scripts/settings_menu.gd"):
+		var settings_menu: Control = load("res://scripts/settings_menu.gd").new()
+		settings_menu.hide()
+		add_child(settings_menu)
+		var settings := UI.button("Settings")
+		settings.pressed.connect(settings_menu.show)
+		v.add_child(settings)
 
 	_status = UI.label("", 15, UI.RED)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

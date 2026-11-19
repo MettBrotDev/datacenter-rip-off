@@ -55,3 +55,14 @@ static func field(placeholder: String, text := "") -> LineEdit:
 	e.add_theme_stylebox_override("normal", box(BG_DARK, 8, BORDER, 10))
 	e.add_theme_stylebox_override("focus", box(BG_DARK, 8, ACCENT, 10))
 	return e
+
+
+## 1234567.8 -> "$1,234,568"
+static func money(value: float) -> String:
+	var digits := str(int(round(absf(value))))
+	var out := ""
+	for i in digits.length():
+		if i > 0 and (digits.length() - i) % 3 == 0:
+			out += ","
+		out += digits[i]
+	return ("-$" if value < 0.0 else "$") + out
