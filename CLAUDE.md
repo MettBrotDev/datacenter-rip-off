@@ -39,6 +39,10 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   walls/floors/ceilings to pin it (`Item.routes[type]` = pin positions, sent with `request_link`); it runs
   straight between pins, cannot be tripped over there, and may be 40 m long in total (`MAX_ROUTED`). Only the
   two ends stay loose. `world.route_problem()` is the one rule for both; `--cables` shows both in the garage.
+- A cable never just vanishes. Tripped over or yanked, its plug comes out and it stays on the floor
+  (`Item.loose_end[type]` = where the plug lies, pins kept; `_r_dangle`). Unplugging puts the end in your hand;
+  put it down (F/G/H), plug it in again, or roll it up (R), which is the only way to remove it. Cable costs
+  `CABLE_COST` dollars a metre, charged once per metre (`Item.cable_m`) when it is plugged in or laid down.
 - Overloading a generator stalls it (or throws the rider off the bike); its share then lands on the others.
 - Internet comes from the garage's wall box and from the router in every house we own.
 - Machines (`psu` in the catalog: office PC, tower server, workstation, GPU server, AI pod, plus mini PC, mining frame (no lid), 2U server, liquid-ready workstation) are

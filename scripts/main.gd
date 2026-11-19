@@ -315,6 +315,7 @@ func _selftest() -> void:
 	me.position = strip.global_position + Vector3(0, 0, 1)
 	world.request_trip(strip.id, "power")
 	_check("tripped over the strip's cable (plugged into %d)" % strip.power_to)
+	print("CHECK the tripped cable is still there: lying on the floor=%s, %.1f m paid for" % [strip.loose_end.has("power"), strip.cable_m.get("power", 0.0)])
 
 	# 11. dumpster: put two crates in, press the button
 	for x: float in [-2.6, 2.8]:

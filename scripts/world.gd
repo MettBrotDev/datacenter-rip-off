@@ -191,6 +191,10 @@ func debug_cables() -> void:
 	_spawn("server", Transform3D(Basis(), Vector3(2.3, 0.3, 1.6)))
 	request_link(neat, "net", -3, [Vector3(2.3, 0.02, 1.0), Vector3(3.35, 0.02, 1.0), Vector3(3.35, 0.02, -3.3),
 		Vector3(1.7, 0.02, -3.44), Vector3(1.7, 1.3, -3.47)])
+	var loose := _next_id   # and one whose cables somebody tripped over: unplugged, still lying there
+	_spawn("server", Transform3D(Basis(), Vector3(-1.8, 0.3, 1.6)))
+	_cast(&"_r_dangle", [loose, "power", [], Vector3(-0.6, 0.02, 2.4), 2.0])
+	_cast(&"_r_dangle", [loose, "net", [Vector3(-2.6, 0.02, 1.2), Vector3(-2.6, 0.02, -0.4)], Vector3(-1.9, 0.02, -0.9), 4.0])
 
 
 ## Host, every physics tick: a delicate part that lands hard breaks; a machine that does may lose parts inside.
@@ -454,8 +458,28 @@ func request_lid(id: int) -> void:
 
 ## provider_id 0 = unplug.
 ## `pins`: points in the world the cable is clipped to on its way from the item to the provider.
-func request_link(id: int, type: String, provider_id: int, pins: Array = []) -> void:
-	_to_host(&"_h_link", [id, type, provider_id, pins])
+## `paid`: metres of this cable that were bought before (it was unplugged and is plugged in again).
+func request_link(id: int, type: String, provider_id: int, pins: Array = [], paid := 0.0) -> void:
+	_to_host(&"_h_link", [id, type, provider_id, pins, paid])
+
+
+## Put the end of a cable we carry down on the floor where we stand. It stays there, pins and all.
+func request_dangle(id: int, type: String, pins: Array, paid: float) -> void:
+	_to_host(&"_h_dangle", [id, type, pins, paid])
+
+
+static func route_length(from: Vector3, pins: Array, to: Vector3) -> float:
+	var total := 0.0
+	var at := from
+	for pin: Vector3 in pins:
+		total += at.distance_to(pin)
+		at = pin
+	return total + at.distance_to(to)
+
+
+## Dollars for running `metres` of cable when `paid` metres of it were bought already.
+static func cable_cost(type: String, metres: float, paid: float) -> int:
+	return ceili(maxf(0.0, metres - paid) * float(Catalog.CABLE_COST[type]))
 
 
 ## Why a cable cannot run from `from` through `pins` to `to` ("" if it can). A loose stretch reaches
@@ -676,7 +700,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened, it.routes])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened, it.routes, it.loose_end, it.cable_m])
 	_r_door.rpc_id(peer, door_open)
 	_r_used.rpc_id(peer, _market.state())
 	for h: House in houses.values():
@@ -780,7 +804,7 @@ func _h_lid(id: int) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _h_link(id: int, type: String, provider_id: int, pins: Array) -> void:
+func _h_link(id: int, type: String, provider_id: int, pins: Array, paid: float) -> void:
 	if not multiplayer.is_server() or type not in LINKS:
 		return
 	var it: Item = items.get(id)
@@ -801,9 +825,47 @@ func _h_link(id: int, type: String, provider_id: int, pins: Array) -> void:
 				return
 		if route_problem(it.global_position, pins, target.global_position) != "":
 			return
+		var metres := route_length(it.global_position, pins, target.global_position)
+		var cost := cable_cost(type, metres, paid)
+		if cost > _sim.money:
+			_notice_to(Net.sender(), "Not enough money for %d m of %s (%s)" % [ceili(metres), LINKS[type], UI.money(cost)])
+			return
+		_sim.money -= cost
+		paid = maxf(paid, metres)
 		if provider_id == id:   # allowed. It just doesn't do anything useful.
 			_cast(&"_r_toast", ["%s plugged a %s into itself" % [name_of(Net.sender()), it.label.to_lower()]])
-	_cast(&"_r_link", [id, type, provider_id, pins])
+	_cast(&"_r_link", [id, type, provider_id, pins, paid])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_dangle(id: int, type: String, pins: Array, paid: float) -> void:
+	if not multiplayer.is_server() or type not in LINKS:
+		return
+	var it: Item = items.get(id)
+	var p := player(Net.sender())
+	if it == null or p == null or not it.def.get(type + "_port", false) or it.link(type) != 0:
+		return
+	for pin: Variant in pins:
+		if not pin is Vector3:
+			return
+	var anchor: Vector3 = pins[-1] if not pins.is_empty() else it.global_position
+	var end := _floor_under(anchor + (p.global_position - anchor).limit_length(Catalog.MAX_CABLE - 0.5))
+	if route_problem(it.global_position, pins, end) != "":
+		return
+	var metres := route_length(it.global_position, pins, end)
+	var cost := cable_cost(type, metres, paid)
+	if cost > _sim.money:
+		_notice_to(Net.sender(), "Not enough money for %d m of %s (%s)" % [ceili(metres), LINKS[type], UI.money(cost)])
+		return
+	_sim.money -= cost
+	_cast(&"_r_dangle", [id, type, pins, end, maxf(paid, metres)])
+
+
+## The floor below a point (a little above it, so a cable end lying there is visible).
+func _floor_under(at: Vector3) -> Vector3:
+	var hit := get_world_3d().direct_space_state.intersect_ray(
+			PhysicsRayQueryParameters3D.create(at + Vector3.UP * 0.6, at + Vector3.DOWN * 6.0, 1))
+	return (hit["position"] if hit else Vector3(at.x, 0.0, at.z)) + Vector3(0, 0.02, 0)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -990,7 +1052,9 @@ func _h_breaker(circuit: int) -> void:
 
 ## Host: pull a cable or hose out. A hose with water in it makes a mess, and one under
 ## pressure (its pump is running) sprays everything nearby.
-func _unplug(it: Item, type: String, who: String) -> void:
+## `end`: where the pulled-out plug comes to rest. The cable stays, lying on the floor from the item
+## (through its pins, or `pins` if given) to there. null = the cable is taken away altogether.
+func _unplug(it: Item, type: String, who: String, end: Variant = null, pins: Variant = null) -> void:
 	if type == "coolant" and it.hose > 0.3:
 		var pump: Item = _sim.pump_for(it, self)
 		var mains: bool = it.def.has("tank") and it.coolant_to < 0
@@ -1016,7 +1080,10 @@ func _unplug(it: Item, type: String, who: String) -> void:
 		else:
 			_cast(&"_r_toast", ["%s pulled out a full coolant hose. There is a puddle now." % who])
 	it.hose = 0.0
-	_cast(&"_r_link", [it.id, type, 0, []])
+	if end == null:
+		_cast(&"_r_link", [it.id, type, 0, [], 0.0])
+	else:
+		_cast(&"_r_dangle", [it.id, type, it.routes.get(type, []) if pins == null else pins, end, it.cable_m.get(type, 0.0)])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -1165,7 +1232,10 @@ func _h_trip(id: int, type: String) -> void:
 		return
 	_cast(&"_r_toast", ["%s tripped over a %s and pulled it out of the %s" % [
 		name_of(Net.sender()), LINKS[type], it.label.to_lower()]])
-	_unplug(it, type, name_of(Net.sender()))
+	# The plug comes out and the cable stays where it was pinned; its end lands by the tripper's feet.
+	var route: Array = it.routes.get(type, [])
+	var anchor: Vector3 = route[-1] if not route.is_empty() else it.global_position
+	_unplug(it, type, name_of(Net.sender()), _floor_under(anchor + (p.global_position - anchor).limit_length(Catalog.MAX_CABLE - 0.5)))
 	_sim_step(0.0)
 
 
@@ -1330,9 +1400,23 @@ func _sim_step(dt: float) -> void:
 			if to == 0:
 				continue
 			var target := provider(to)
-			if target == null or route_problem(it.global_position, it.routes.get(type, []), target.global_position) != "":
+			var route: Array = it.routes.get(type, [])
+			if target == null:
+				_unplug(it, type, "Somebody", _floor_under(route[-1] if not route.is_empty() else it.global_position))
+			elif route_problem(it.global_position, route, target.global_position) != "":
 				_cast(&"_r_toast", ["The %s of a %s got yanked out" % [LINKS[type], it.label.to_lower()]])
-				_unplug(it, type, "Somebody")
+				var first: Vector3 = route[0] if not route.is_empty() else target.global_position
+				if it.global_position.distance_to(first) > Catalog.MAX_CABLE:   # the item was dragged off: the cable comes along
+					_unplug(it, type, "Somebody", _floor_under(it.global_position + (first - it.global_position).limit_length(1.2)), [])
+				else:   # the far end moved away: the plug drops where the cable ends
+					var last: Vector3 = route[-1] if not route.is_empty() else it.global_position
+					_unplug(it, type, "Somebody", _floor_under(last + (target.global_position - last).limit_length(1.2)))
+		for type: String in it.loose_end.keys():   # a loose cable is dragged along when its item moves away
+			var route: Array = it.routes.get(type, [])
+			var first: Vector3 = route[0] if not route.is_empty() else it.loose_end[type]
+			if it.global_position.distance_to(first) > Catalog.MAX_CABLE:
+				_cast(&"_r_dangle", [it.id, type, [], _floor_under(it.global_position + (first - it.global_position).limit_length(1.2)),
+					it.cable_m.get(type, 0.0)])
 	for puddle: Dictionary in puddles.duplicate():   # puddles dry up
 		puddle["left"] -= dt
 		if puddle["left"] <= 0.0:
@@ -1413,6 +1497,9 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.opened = st[9]
 	if st.size() > 10:
 		it.routes = st[10]
+	if st.size() > 12:
+		it.loose_end = st[11]
+		it.cable_m = st[12]
 	_items.add_child(it)
 	it.global_transform = xf
 	it._pin_xf = xf
@@ -1499,10 +1586,29 @@ func _r_attach(id: int, parent_id: int, slot: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _r_link(id: int, type: String, provider_id: int, pins: Array) -> void:
+func _r_link(id: int, type: String, provider_id: int, pins: Array, paid: float) -> void:
 	var it: Item = items.get(id)
 	if it:
 		it.set_link(type, provider_id)
+		it.loose_end.erase(type)
+		if pins.is_empty():
+			it.routes.erase(type)
+		else:
+			it.routes[type] = pins
+		if provider_id == 0:
+			it.cable_m.erase(type)
+		else:
+			it.cable_m[type] = paid
+
+
+## A cable that is not plugged in: it lies from the item through `pins` to `end`.
+@rpc("authority", "call_remote", "reliable")
+func _r_dangle(id: int, type: String, pins: Array, end: Vector3, paid: float) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.set_link(type, 0)
+		it.loose_end[type] = end
+		it.cable_m[type] = paid
 		if pins.is_empty():
 			it.routes.erase(type)
 		else:

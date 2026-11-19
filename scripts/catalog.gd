@@ -46,6 +46,7 @@ const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its
 const MAX_CABLE := 7.0           # metres a loose stretch of cable reaches before it gets yanked out
 const MAX_ROUTED := 40.0         # metres of cable in total when it is pinned along the way
 const MAX_PINS := 24
+const CABLE_COST := {"power": 1.0, "net": 1.0, "coolant": 3.0}   # dollars per metre; you pay for a metre once
 # Loose CPUs, RAM sticks and GPUs are delicate. A hit takes speed off them: below HIT_SAFE m/s nothing happens
 # (letting go at chest height is about 5), from HIT_SURE up it is certain (a throw lands at 8 to 10).
 const HIT_SAFE := 6.5

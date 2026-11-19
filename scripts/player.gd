@@ -39,7 +39,7 @@ var _trip_wait := 0.0         # seconds until we can trip again
 var _ghost: MeshInstance3D    # preview of where the held item would be placed
 var _place_xf: Variant = null # Transform3D of that spot, or null when there is none
 var _place_turns := 0         # extra quarter turns chosen with R
-var _cable: Dictionary = {}   # cable end in hand: {"id": item id, "type": "power" | "net"}
+var _cable: Dictionary = {}   # cable end in hand: {"id": item id, "type", "pins": [Vector3], "paid": metres bought}
 var _acts: Array = []         # what the keys do right now: [[input action, prompt text, Callable]]
 
 
@@ -291,8 +291,10 @@ func _update_actions() -> void:
 	var held: Node3D = _world.held_by(peer_id)
 	var acts: Array = []
 	_place_xf = null
-	if not _cable.is_empty() and (held or not _world.items.has(_cable["id"])):
+	if not _cable.is_empty() and not _world.items.has(_cable["id"]):
 		_set_cable({})
+	elif not _cable.is_empty() and held:   # hands full: the cable end goes on the floor
+		_put_down()
 	var bike: Node3D = _world.ridden_by(peer_id)
 	if bike:
 		acts.append(["use", "[Q] Hop off", _world.request_use.bind(bike.id)])
@@ -308,7 +310,13 @@ func _update_actions() -> void:
 			elif why != "":
 				acts.append(["", why, Callable()])
 			else:
-				acts.append(["primary", "[LMB] Plug into %s" % t.label.to_lower(), _plug.bind(t.id)])
+				var metres: float = _world.route_length(from, pins, t.global_position)
+				var cost: int = _world.cable_cost(type, metres, _cable["paid"])
+				if cost > _world.money:
+					acts.append(["", "%d m of %s costs %s. You do not have that." % [ceili(metres), WORDS[type], UI.money(cost)], Callable()])
+				else:
+					acts.append(["primary", "[LMB] Plug into %s%s" % [t.label.to_lower(),
+							"   (%d m, %s)" % [ceili(metres), UI.money(cost)] if cost > 0 else ""], _plug.bind(t.id)])
 		else:
 			# Tidy or messy is up to you: click walls, floors and ceilings to clip the cable down
 			# along the way, or just drag it straight across the room.
@@ -321,7 +329,8 @@ func _update_actions() -> void:
 			acts.append(["", "Holding a %s. Plug it in somewhere, or pin it along the way to keep it tidy." % WORDS[type], Callable()])
 		if not pins.is_empty():
 			acts.append(["use", "[Q] Take the last pin up (%d)" % pins.size(), _unpin])
-		acts.append([type, "[%s] Let go" % KEYS[type], _set_cable.bind({})])
+		acts.append([type, "[%s] Put the end down" % KEYS[type], _put_down])
+		acts.append(["rotate", "[R] Roll the %s up (it is gone then)" % WORDS[type], _set_cable.bind({})])
 	elif held:
 		if held.kind == "fuel" and t is RigidBody3D and t.def.get("gen", {}).get("kind", "") == "fuel":
 			acts.append(["interact", "[E] Refuel %s (%d%% full)" % [t.label.to_lower(), t.fuel * 100.0],
@@ -368,10 +377,12 @@ func _update_actions() -> void:
 				continue
 			if t.link(type) != 0:
 				var warning := "  (FULL: it will spill!)" if type == "coolant" and t.hose > 0.3 else ""
-				acts.append([type, "[%s] Unplug %s%s" % [KEYS[type], WORDS[type], warning], _world.request_link.bind(t.id, type, 0)])
+				acts.append([type, "[%s] Unplug %s%s" % [KEYS[type], WORDS[type], warning], _take_end.bind(t.id, type)])
+			elif t.loose_end.has(type):
+				acts.append([type, "[%s] Pick up the loose end of its %s" % [KEYS[type], WORDS[type]], _take_end.bind(t.id, type)])
 			else:
-				acts.append([type, "[%s] Grab %s" % [KEYS[type], WORDS[type]],
-						_set_cable.bind({"id": t.id, "type": type, "pins": []})])
+				acts.append([type, "[%s] Pull out a new %s" % [KEYS[type], WORDS[type]],
+						_set_cable.bind({"id": t.id, "type": type, "pins": [], "paid": 0.0})])
 		if t.kind == "parcel":
 			acts.append(["use", "[Q] Unpack", _world.request_unpack.bind(t.id)])
 		if t.def.get("wear", false) and _world.worn_by(peer_id) == null:
@@ -571,7 +582,21 @@ func _set_cable(cable: Dictionary) -> void:
 
 
 func _plug(provider_id: int) -> void:
-	_world.request_link(_cable["id"], _cable["type"], provider_id, _cable["pins"])
+	_world.request_link(_cable["id"], _cable["type"], provider_id, _cable["pins"], _cable["paid"])
+	_set_cable({})
+
+
+## Take the far end of an item's cable in hand, plugged in or lying about. Its pins stay where they are.
+func _take_end(id: int, type: String) -> void:
+	var it: Node3D = _world.items[id]
+	var cable := {"id": id, "type": type, "pins": (it.routes.get(type, []) as Array).duplicate(), "paid": float(it.cable_m.get(type, 0.0))}
+	_world.request_link(id, type, 0)
+	_set_cable(cable)
+
+
+## Lay the end we carry on the floor here. The cable stays until somebody picks it up or rolls it up.
+func _put_down() -> void:
+	_world.request_dangle(_cable["id"], _cable["type"], _cable["pins"], _cable["paid"])
 	_set_cable({})
 
 

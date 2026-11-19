@@ -52,6 +52,13 @@ func _process(_dt: float) -> void:
 				_pool[key]["link"] = [it.id, type]
 				if type == "coolant":   # grey when empty, blue when full
 					_pool[key]["mat"].albedo_color = HOSE_EMPTY.lerp(HOSE_FULL, it.hose)
+			elif it.loose_end.has(type):   # unplugged, lying on the floor with its plug at the end
+				var key := "%d%sx" % [it.id, type]
+				seen[key] = true
+				var path: Array = [it.port_pos(type)]
+				path.append_array(it.routes.get(type, []))
+				path.append(it.loose_end[type])
+				_draw(key, type, path, true)
 	if not world.preview.is_empty():
 		var src: Node3D = world.items.get(world.preview["id"])
 		var me: Node3D = world.player(multiplayer.get_unique_id())
@@ -96,7 +103,7 @@ func _socket_pos(target: Node3D, plug_id: int) -> Vector3:
 
 
 ## `path` = where it leaves the device, every pin, where it ends.
-func _draw(key: String, type: String, path: Array) -> void:
+func _draw(key: String, type: String, path: Array, plug := false) -> void:
 	var entry: Dictionary = _pool.get(key, {})
 	if entry.is_empty():
 		var node := Node3D.new()
@@ -106,6 +113,14 @@ func _draw(key: String, type: String, path: Array) -> void:
 			mat = mat.duplicate()   # every hose has its own colour
 		entry = {"node": node, "path": [], "points": [], "loose": [], "mat": mat, "clips": []}
 		_pool[key] = entry
+		if plug:   # a chunky plug on the free end, so you can see that it is not in anything
+			var head := MeshInstance3D.new()
+			head.mesh = _clip
+			head.material_override = _mats["power"]
+			node.add_child(head)
+			entry["plug"] = head
+			entry["clips"].append(head)   # counted with the clips so segments stay in front of it in the child list
+			entry["extra"] = 1
 	var old: Array = entry["path"]
 	if old.size() == path.size():
 		var same := true
@@ -173,18 +188,21 @@ func _draw(key: String, type: String, path: Array) -> void:
 		seg.transform = Transform3D(Basis(x * radius, y * (length + radius), x.cross(y) * radius), (points[i] + points[i + 1]) * 0.5)
 
 	# one clip per pin
+	var extra: int = entry.get("extra", 0)
+	if extra == 1:
+		(entry["plug"] as MeshInstance3D).transform = Transform3D(Basis().scaled(Vector3(radius * 3.0, radius * 2.4, radius * 5.0)), path[-1])
 	var pins := path.size() - 2
-	while clips.size() < pins:
+	while clips.size() - extra < pins:
 		var clip := MeshInstance3D.new()
 		clip.mesh = _clip
 		clip.material_override = _clip_mat
 		node.add_child(clip)
 		clips.append(clip)
-	for i in clips.size():
+	for i in range(extra, clips.size()):
 		var clip: MeshInstance3D = clips[i]
-		clip.visible = i < pins
-		if i < pins:
-			clip.transform = Transform3D(Basis().scaled(Vector3.ONE * radius * 3.2), path[i + 1])
+		clip.visible = i - extra < pins
+		if i - extra < pins:
+			clip.transform = Transform3D(Basis().scaled(Vector3.ONE * radius * 3.2), path[i - extra + 1])
 
 
 func _mat(color: Color) -> StandardMaterial3D:
