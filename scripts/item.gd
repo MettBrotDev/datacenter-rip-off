@@ -26,6 +26,7 @@ var cable_m: Dictionary = {}   # link type -> metres of that cable already paid 
 var worn := 0           # heat suit: peer id wearing it
 var opened := false     # machines: the lid is off, parts can go in and out
 var dust := 0.0         # machines: 0 clean .. 1 choked; the host simulates it, every peer sees it
+var shed := 0.0         # machines, host only: watts of heat it is putting into the air around it right now
 var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation
 var contains := ""      # parcels: the item kind inside
 var broken := false     # ruined by rain; set through status bit 2 so every peer shows it

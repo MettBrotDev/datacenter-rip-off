@@ -731,6 +731,10 @@ func _facts(def: Dictionary) -> Array:
 		rows.append(["Sockets", "%d (%s)" % [def["sockets"], {"power": "power", "net": "network", "coolant": "coolant hose"}[def["provides"]]]])
 	if def.has("slots"):
 		rows.append(["Slots", _slot_summary(def)])
+	if def.get("sink", 0.0) > 0.0:
+		rows.append(["Own cooler", "holds it %d °C above the air around it" % roundi(def["watts"] / def["sink"])])
+	if def.has("airflow"):
+		rows.append(["Case airflow", "x%.2f" % def["airflow"]])
 	if def.has("psu") and def.has("ram"):
 		var speed: float = Catalog.RAM_SPEED[def["ram"]]
 		rows.append(["Memory type", "%s%s" % [Catalog.RAM_NAMES[def["ram"]], "" if is_equal_approx(speed, 1.0) else "  (GPUs %+d%%)" % roundi((speed - 1.0) * 100.0)]])

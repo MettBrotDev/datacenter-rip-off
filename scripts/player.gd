@@ -556,7 +556,7 @@ func _machine_lines(t: Node3D, acts: Array) -> void:
 	if t.def.get("lid", false):
 		acts.append(["", "The lid is off: parts go in and out, and so does dust" if t.opened else "Lid screwed on: a screwdriver opens it", Callable()])
 	if t.dust >= 0.05:
-		acts.append(["", "Dust %d%%%s" % [t.dust * 100.0, ": chips run up to %d °C hotter. An air duster fixes that." % (t.dust * Sim.DUST_RISE) if t.dust >= 0.25 else ""], Callable()])
+		acts.append(["", "Dust %d%%%s" % [t.dust * 100.0, ": its fans move %d%% less air, so it runs hotter. An air duster fixes that." % (t.dust * Sim.DUST_CHOKE * 100.0) if t.dust >= 0.25 else ""], Callable()])
 
 
 func _place() -> void:

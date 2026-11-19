@@ -172,6 +172,11 @@ const WEATHER: Array[Dictionary] = [
 ## Every machine takes exactly one; faster memory feeds the cards a little better.
 const RAM_NAMES := {"ddr3": "DDR3", "ddr4": "DDR4", "ddr5": "DDR5", "rdimm": "server RDIMM"}
 const RAM_SPEED := {"ddr3": 0.9, "ddr4": 1.0, "ddr5": 1.06, "rdimm": 1.12}   # multiplies what the GPUs make
+# Degrees above the surrounding air a graphics card's own cooler holds it at, flat out (default 38).
+const GPU_RISE := {"gpu_580": 44.0, "gpu_1650": 34.0, "gpu_4060": 34.0, "gpu_4070ti": 40.0, "gpu_6000": 46.0, "gpu_5090": 50.0}
+# How well a chassis feeds its parts' coolers with air: cramped boxes below 1, open frames above.
+const CASE_AIRFLOW := {"pc_office": 0.8, "mini_pc": 0.75, "server": 1.0, "server_frame": 1.25, "server_ws": 1.1,
+	"server_wslc": 1.1, "server_2u": 0.95, "server_4u": 1.2, "server_pod": 1.2}
 const RAM_TYPE := {
 	"ram_4": "ddr3", "ram_8": "ddr3", "ram_d3_16": "ddr3",
 	"ram_16": "ddr4", "ram_32": "ddr4",
@@ -189,6 +194,17 @@ static var ITEMS: Dictionary = _typed(_build())
 static func _typed(items: Dictionary) -> Dictionary:
 	for kind: String in RAM_TYPE:
 		items[kind]["ram"] = RAM_TYPE[kind]
+	# Coolers. A part's `sink` is the watts its own cooler moves into the air per degree the chip is above
+	# that air. It is sized from the part's power: a cooler built for `rise` degrees at full load.
+	for kind: String in items:
+		var def: Dictionary = items[kind]
+		match def.get("group", ""):
+			"gpu":
+				def["sink"] = 0.0 if def.get("liquid", false) else float(def["watts"]) / float(GPU_RISE.get(kind, 38.0))
+			"cpu":
+				def["sink"] = float(def["watts"]) / 30.0
+		if def.has("psu"):
+			def["airflow"] = CASE_AIRFLOW.get(kind, 1.0)
 	return items
 
 
@@ -1066,7 +1082,7 @@ static func _build() -> Dictionary:
 			]},
 		# --- keeping it from burning down ---
 		"fan": {"label": "Box fan", "price": 45, "watts": 30.0, "power_port": true, "fragile": true,
-			"cool": {"vent": 45.0},
+			"cool": {"vent": 150.0},
 			"size": Vector3(0.5, 0.55, 0.18), "mass": 3.0, "parts": _boxfan_parts()},
 		"aircon": {"label": "Portable air conditioner", "price": 900, "watts": 700.0, "power_port": true,
 			"fragile": true, "solid": true, "cool": {"remove": 2500.0},

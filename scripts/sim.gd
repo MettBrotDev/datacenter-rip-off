@@ -23,19 +23,25 @@ extends RefCounted
 
 const Catalog = preload("res://scripts/catalog.gd")
 const OVERLOAD_STEPS := 3      # 1.5 s over the limit before something gives
-const LEAK := 120.0            # watts a closed building loses per degree above outside
-const ROOM_TIME := 45.0        # seconds for a room to get most of the way to a new temperature
+# --- rooms: see room_loss() and _room_step() ---
+const AIR_HEAT := 1206.0       # joules to warm one cubic metre of air by one degree
+const ROOM_MASS := 0.25        # share of that the game uses: rooms react four times faster than real air would
+const ROOM_ACH := 0.5          # air changes per hour through the cracks of a closed building
+const DOOR_FLOW := 0.2         # discharge coefficient / 3 of an open doorway (warm air out at the top, cool in below)
+const PAD_LOSS := 6000.0       # watts per degree of a pad with no walls: it is simply outdoors
+const ROOM_FLOOR := 16.0       # air conditioners do not cool a room below this
+const TAP_TEMP := 14.0         # water from the garden tap
+const TAP_FLOW := 120.0        # watts per degree a loop fed from the tap gets rid of with the water it wastes
 const CHIP_TIME := 12.0        # ...and for a chip
 const COOLANT_TIME := 30.0     # ...and for the coolant in a loop
-const CHIP_RISE_IDLE := 12.0   # degrees a chip sits above the room when doing nothing
-const CHIP_RISE_CPU := 30.0    # ...a busy server with no GPUs
-const CHIP_RISE_AIR := 48.0    # ...a busy server with air-cooled GPUs
+# --- chips: see _chip_step() ---
+const CASE_SINK := 2.5         # watts per degree a chassis' own fans carry off before any part's cooler helps
+const DUST_CHOKE := 0.45       # share of its airflow a machine choked with dust has lost
 const CHIP_RISE_LIQUID := 25.0 # degrees a liquid-cooled chip sits above its coolant
 const CHIP_RISE_DRY := 110.0   # a fanless card with no coolant moving: far too much
 const CHIP_THROTTLE := 85.0    # half speed
 const CHIP_SHUTDOWN := 100.0   # switches itself off...
 const CHIP_RESUME := 80.0      # ...until it is this cool again
-const DUST_RISE := 30.0        # degrees hotter a machine choked with dust runs
 const DUST_OPEN := 1.0 / 720.0     # dust per second in a running machine with no lid on: full in 12 minutes
 const DUST_CLOSED := 1.0 / 7200.0  # ...with its lid on: full in two hours
 const CHIP_IGNITE := 110.0     # hardware whose protection is broken keeps going, then burns
@@ -278,6 +284,10 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if c < 0:
 			continue
 		var warmth := draw
+		if reports.has(it.id):
+			warmth = it.shed      # a machine warms the room by what its fans actually blow out (see _chip_step)
+		elif reports.has(it.parent):
+			warmth = 0.0          # a part inside one: counted in the machine's figure
 		if it.burning:
 			warmth += 1500.0
 		if it.def.has("gen") and limit.has(it.id) and it.def["gen"]["kind"] == "fuel":
@@ -366,10 +376,15 @@ func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into
 					air += per_degree * around
 					if inside:
 						indoors.append([c, per_degree, around])
+			if tank != null and tank.coolant_to < 0:   # fed from the tap: cold water in, warm water down the drain
+				shed += TAP_FLOW
+				air += TAP_FLOW * TAP_TEMP
 			var target: float = (air + into.get(pump.id, 0.0)) / shed if shed > 0.0 else 160.0
 			pump.heat += (target - pump.heat) * (1.0 - exp(-dt / COOLANT_TIME))
-			for entry: Array in indoors:   # a radiator indoors just heats the room it is in
-				heat[entry[0]] = heat.get(entry[0], 0.0) + maxf(0.0, entry[1] * (pump.heat - entry[2]))
+			# A radiator indoors trades heat with its room in whichever direction the temperatures say:
+			# hot coolant warms the room, coolant that was cooled outdoors (or comes from the tap) cools it.
+			for entry: Array in indoors:
+				heat[entry[0]] = heat.get(entry[0], 0.0) + entry[1] * (pump.heat - entry[2])
 			var boiling: bool = pump.heat >= 100.0
 			if tank != null and tank.coolant_to >= 0:
 				tank.fuel = maxf(0.0, tank.fuel - EVAPORATION * dt * (8.0 if boiling else 1.0))
@@ -397,16 +412,43 @@ func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into
 			events.append("The hoses on that coolant loop are empty. Safe to unplug.")
 
 
-## Moves every building's air temperature towards where its heat and cooling would settle.
+## Watts a building loses for every degree its air is above the outside air, when it is `above` degrees warmer.
+##   walls and roof:   u * area
+##   cracks:           AIR_HEAT * volume * ROOM_ACH / 3600
+##   an open doorway:  AIR_HEAT * DOOR_FLOW * door * sqrt(9.81 * door_h * above / 300)
+##                     (warm air leaves at the top of the opening and cool air comes in below; the bigger
+##                     the difference, the faster it goes, so an open door matters most when it is needed)
+##   fans in the room: `vent` watts per degree on top
+static func room_loss(shape: Dictionary, above: float, vent := 0.0) -> float:
+	if shape["open"]:
+		return PAD_LOSS
+	var loss: float = shape["u"] * shape["area"] + AIR_HEAT * shape["volume"] * ROOM_ACH / 3600.0 + vent
+	if shape["door"] > 0.0:
+		loss += AIR_HEAT * DOOR_FLOW * shape["door"] * sqrt(9.81 * shape["door_h"] * maxf(absf(above), 1.0) / 300.0)
+	return loss
+
+
+## Degrees above outside a building settles at with `watts` of heat going into it.
+static func room_settles(shape: Dictionary, watts: float, vent := 0.0) -> float:
+	var above := 5.0
+	for i in 30:
+		above = watts / room_loss(shape, above, vent)
+	return above
+
+
+## Every building's air:  heat capacity * dT/dt = heat in - heat taken out - room_loss * (T - outside)
+## where heat capacity = AIR_HEAT * volume * ROOM_MASS. Bigger rooms warm more slowly and lose more.
 func _room_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: Dictionary,
 		dt: float, events: Array) -> void:
 	var outside := outside_temp()
 	for c: int in circuits:
 		var cool: Array = cooling.get(c, [0.0, 0.0])
-		var leak: float = LEAK * world.vent_factor(c) + cool[0]
-		var target: float = maxf(outside + (heat.get(c, 0.0) - cool[1]) / leak, outside - 6.0)
+		var shape: Dictionary = world.room(c)
 		var now: float = temps.get(c, outside)
-		now += (target - now) * (1.0 - exp(-dt / ROOM_TIME))
+		var loss := room_loss(shape, now - outside, cool[0])
+		var target: float = maxf(outside + (heat.get(c, 0.0) - cool[1]) / loss, minf(outside, ROOM_FLOOR))
+		var mass: float = AIR_HEAT * shape["volume"] * ROOM_MASS
+		now += (target - now) * (1.0 - exp(-dt * loss / mass))
 		temps[c] = now
 		if now >= 55.0:
 			_say(events, "room%d" % c, "It is %d °C in %s. Nobody should stay in there for long." % [now, circuits[c][1]])
@@ -417,6 +459,12 @@ func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of:
 		flowing: Dictionary, reports: Dictionary, dt: float, events: Array) -> void:
 	var outside := outside_temp()
 	var filtered := {}   # circuit id -> true where a running air purifier keeps the dust out of the air
+	var parts_of := {}   # machine id -> the parts in it
+	for it: Node3D in world.items.values():
+		if it.parent != 0 and reports.has(it.parent):
+			if not parts_of.has(it.parent):
+				parts_of[it.parent] = []
+			parts_of[it.parent].append(it)
 	for it: Node3D in world.items.values():
 		if it.def.get("purifier", false) and powered.get(it.id, false) and not ruined.has(it.id) and not world.is_outdoors(it.global_position):
 			filtered[world.circuit_at(it.global_position)] = true
@@ -427,27 +475,42 @@ func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of:
 		var room: float = temps.get(c, outside) if c >= 0 and not world.is_outdoors(it.global_position) else outside
 		if it.heat == 0.0:
 			it.heat = room
+		# A machine makes `making` watts of heat. Its coolers move  sink * (chip - air)  watts into the air:
+		#   sink = (CASE_SINK + airflow * sum of its parts' own coolers) * (1 - DUST_CHOKE * dust)
+		# so it settles where both are equal, at  air + making / sink:  the warmer the air, the hotter the chip.
+		# Liquid cards give their heat to the coolant instead, and sit CHIP_RISE_LIQUID above it.
 		var target := room
+		var making := 0.0
+		var sink := CASE_SINK
 		if powered[it.id] and not ruined.has(it.id) and reports[it.id]["boots"]:
-			target = room + CHIP_RISE_IDLE
+			making = it.def.get("watts", 0.0)
+			var p: int = pump_of.get(it.id, 0)
+			var flow: bool = flowing.get(p, false)
+			var wet := false
+			var dry := false
 			if not it.cooked:
-				var cards: Array = reports[it.id]["cards"]
-				var fanless := false
-				for gpu: Node3D in cards:
-					fanless = fanless or gpu.def.get("liquid", false)
-				var p: int = pump_of.get(it.id, 0)
-				if fanless and flowing.get(p, false):
-					target = world.items[p].heat + CHIP_RISE_LIQUID
-				elif fanless:
-					target = room + CHIP_RISE_DRY
-				else:
-					target = room + (CHIP_RISE_CPU if cards.is_empty() else CHIP_RISE_AIR)
+				for part: Node3D in parts_of.get(it.id, []):
+					if part.broken or ruined.has(part.id):
+						continue
+					if part.def.get("liquid", false):
+						wet = wet or flow
+						dry = dry or not flow
+						if flow:
+							continue   # that heat leaves through the hose
+					making += part.def.get("watts", 0.0)
+					sink += part.def.get("sink", 0.0) * float(it.def.get("airflow", 1.0))
 				# Fans pull dust in, much faster with the lid off; a purifier in the building stops it.
 				if not (filtered.has(c) and not world.is_outdoors(it.global_position)):
 					var lidless: bool = it.opened or not it.def.get("lid", false)
 					it.dust = minf(1.0, it.dust + (DUST_OPEN if lidless else DUST_CLOSED) * dt)
-				target += it.dust * DUST_RISE
+			sink *= 1.0 - DUST_CHOKE * it.dust
+			target = room + making / sink
+			if wet:
+				target = maxf(target, world.items[p].heat + CHIP_RISE_LIQUID)
+			if dry:
+				target = maxf(target, room + CHIP_RISE_DRY)   # a fanless card with nothing flowing through it
 		it.heat += (target - it.heat) * (1.0 - exp(-dt / CHIP_TIME))
+		it.shed = clampf(sink * (it.heat - room), 0.0, making * 1.2) if making > 0.0 else 0.0
 		if it.heat >= CHIP_IGNITE and it.sketchy and not it.burning and not ruined.has(it.id):
 			ignite(it)
 			events.append("A used server hit %d °C, ignored it, and caught fire!" % it.heat)

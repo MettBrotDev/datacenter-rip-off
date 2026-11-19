@@ -669,6 +669,19 @@ func _selftest() -> void:
 		sticks.append(world.items[world._next_id - 1])
 		world._cast(&"_r_release", [sticks[i].id, Transform3D(Basis(), Vector3(-2.0 + i, 1.2, 14.0)),
 			Vector3(0, -11.0 if i == 1 else 0.0, 0)])
+	#     heat: what the formulas give for the garage and the smallest house
+	var gar: Dictionary = world.room(1000)
+	var shut: Dictionary = gar.duplicate()
+	shut["door"] = 0.0
+	var wide: Dictionary = gar.duplicate()
+	wide["door"] = 8.5
+	print("CHECK garage %d m3: loses %d W per degree closed, %d with the door open (at +10); settles at +%.1f / +%.1f / +%.1f degrees closed with 300 W / 1 kW / 3.6 kW, +%.1f with 3.6 kW and the door open" % [
+		gar["volume"], world._sim.room_loss(shut, 10.0), world._sim.room_loss(wide, 10.0), world._sim.room_settles(shut, 300.0), world._sim.room_settles(shut, 1000.0),
+		world._sim.room_settles(shut, 3600.0), world._sim.room_settles(wide, 3600.0)])
+	var cards: Array[String] = []
+	for kind: String in ["gpu_1080", "gpu_580", "gpu_4090", "gpu_5090"]:
+		cards.append("%s %d W, cooler %.1f W per degree" % [kind, Catalog.ITEMS[kind]["watts"], Catalog.ITEMS[kind]["sink"]])
+	print("CHECK coolers: %s" % "; ".join(cards))
 	#     dust: an open frame fills up, an air duster empties it
 	world._spawn("server_frame", Transform3D(Basis(), Vector3(3, 0.3, 14)))
 	var frame: Node3D = world.items[world._next_id - 1]

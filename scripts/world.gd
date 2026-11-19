@@ -322,6 +322,21 @@ func circuits() -> Dictionary:
 	return out
 
 
+## What the heat simulation needs to know about a building: `volume` of air in m3, `area` of walls and roof
+## in m2, `u` how leaky those are in W per m2 and degree, `door` m2 of doorway standing open and its `door_h`
+## height in m, `open` = no walls at all (a demolished house's pad).
+func room(circuit: int) -> Dictionary:
+	if circuit == GARAGE_CIRCUIT:
+		return {"volume": Garage.W * Garage.D * Garage.H, "area": 2.0 * (Garage.W + Garage.D) * Garage.H + Garage.W * Garage.D,
+			"u": 1.0, "door": 8.5 if door_open else 0.0, "door_h": 2.5, "open": false}
+	var h: House = houses.get(circuit)
+	if h == null:
+		return {"volume": 150.0, "area": 150.0, "u": 0.6, "door": 0.0, "door_h": 2.1, "open": false}
+	var foot: Vector2 = Town.FOOTPRINTS[h.lot["size"]]
+	return {"volume": foot.x * foot.y * 2.6, "area": 2.0 * (foot.x + foot.y) * 2.6 + foot.x * foot.y,
+		"u": 0.6, "door": 2.5 if h.door_open else 0.0, "door_h": 2.1, "open": h.state == House.GONE}
+
+
 ## How much faster than a sealed room this building loses heat (open doors, no walls at all).
 func vent_factor(circuit: int) -> float:
 	if circuit == GARAGE_CIRCUIT:

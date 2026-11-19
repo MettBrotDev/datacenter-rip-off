@@ -63,9 +63,15 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   at all (full in 12 min), slowly when closed (2 h); it adds up to `DUST_RISE` 30 C to the chips. The air duster
   tool blows it out (lid must be off); a powered air purifier (`purifier` in the catalog) stops dust in its building.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
-- Heat uses believable numbers. Rooms: every watt used in a building warms its air (`sim._room_step`);
-  doors, fans, air conditioners cool it. Chips (`Item.heat` on servers): about 48 C above the room when
-  busy and air-cooled; throttle at 85, shut down at 100, resume at 80. Consumer GPUs never need more.
+- Heat is two balances (`sim.gd`; formulas in the comments of `room_loss`, `_room_step`, `_chip_step`).
+  Room: `AIR_HEAT * volume * ROOM_MASS * dT/dt = heat in - removed - room_loss * (T - outside)`, with
+  `room_loss = u * area + cracks + open doorway (grows with the square root of the difference) + fans`; the
+  building's shape comes from `world.room(circuit)`. Chips (`Item.heat` on machines): a machine makes its
+  parts' watts and sheds `sink * (chip - room air)`, `sink = (CASE_SINK + airflow * sum of part coolers) *
+  (1 - DUST_CHOKE * dust)`, so it settles at `room + watts / sink`; what it sheds (`Item.shed`) is what warms
+  the room. Part coolers (`sink`) and case `airflow` are derived in `Catalog._typed` (`GPU_RISE`,
+  `CASE_AIRFLOW`). Throttle at 85, shut down at 100, resume at 80. Indoor radiators trade heat with the room
+  in both directions, and a loop fed from the tap dumps heat at 14 C.
 - Liquid cooling (`sim._coolant_step`): `liquid` GPUs have no fans; their server needs a coolant hose
   (third link type "coolant", key H) to a manifold -> pump -> reservoir (-> garden tap for auto-refill),
   with a radiator on the same pump, outdoors. Hoses have a fill level (`Item.hose`). Unplugging a full
