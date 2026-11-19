@@ -60,19 +60,30 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   Pumps can drain their hoses first. Puddles (`world.puddles`) ruin electronics standing in them.
 - People: above 50 C (deliberately generous) the local player's `exposure` builds up; at 100% they pass out and wake on the
   driveway. A worn heat suit (`Item.worn`) prevents it and slows walking.
-- Money: servers only make TOKENS. `company.gd` (host only, rules) and `company_data.gd` (all content
-  and numbers) turn them into money. Design intent from the owner: money is ALWAYS TIGHT, and there is
-  a steep ladder where every step needs far more tokens and pays more per token.
-  - Raw tokens sell on a swinging spot market (worst deal). Slop: cheap, short-lived. Products: need a
-    smart model and hundreds of thousands to millions of tokens, i.e. real infrastructure.
+- Money: servers make TOKENS PER SECOND (TPS): a live stream, not a currency. It cannot be stored; use it
+  now or it is wasted (it still burns the watts). `company.gd` (host only, rules) and `company_data.gd` (all
+  content and numbers) turn it into money. Design intent from the owner: money is ALWAYS TIGHT, and there is
+  a steep ladder where every step needs far more compute and pays more per token.
+  - Every tick the live TPS (`sim.tokens`, `Company.test_tps` overrides it in tests) is handed out in order:
+    1. serving what is live (products, platform users): each wants `serve` tok/s at full hype; short of it,
+       everybody gets the same share, income drops in proportion, and after 30 s of it the hype rots faster;
+    2. jobs (slop, products, updates, writing a training component, a training run): work measured in
+       tokens, progressed by the tokens routed to them (x model `speed`). Equal split; one job can be
+       marked priority (`request_company("priority", id)`) and then takes all it can use first. No compute =
+       the job stalls, never fails. Rush with cash = work left x `RUSH_PRICE`;
+    3. rental: what is left is sold at the swinging spot price per token (`rent` switch, on by default,
+       the worst deal by far; funding stages add +25% each). Switch off or nobody to sell to = WASTED,
+       shown honestly in the menu and on the ops board (`state()["flow"]`).
+  - Slop needs no serving. Updates are small jobs on a live product and hold no slot.
   - Models have four stats: `smart` 1-5 (what it can make, how good its code is), `productivity`
     (income per token), `reliability` (not hallucinating), `speed`. Licensed models (parody names) are
     rented per minute or bought; some are slop-only.
   - Own models: the model in use writes a five-part training stack (`COMPONENTS`, levels 0-5, capped by
     its smartness); a stack at level N trains a model of smartness N + 1. No licence fees afterwards.
+    A failed training run restarts from a halfway checkpoint.
   - Running costs never stop: garage rent (until the landlady's house is ours), property tax per
     house, model licence, 12% taxes. Below zero the landlady cuts the garage's internet.
-  - Lifetime earnings set the funding stage: unlocks content, +1 slot, token storage x6.
+  - Lifetime earnings set the funding stage: unlocks content, +1 slot, +25% rental price.
   Every peer sees `world.co` (= `Company.state()`); actions go through `world.request_company()`.
 - UI: `ui.gd` is the design system (Inter + Material Icons from `fonts/`, loaded at runtime by
   `UI.setup()`; colours, text styles, cards, buttons by kind, chips, pills, bars, tiles). Every screen

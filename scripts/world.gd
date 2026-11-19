@@ -460,9 +460,10 @@ func request_fainted() -> void:
 
 
 ## Ask the company to do something. Actions and their arguments:
-##   "sell" [tokens, 0 = all]        "start" [kind "slop"|"product", key, size 0-2, risk 0-2]
+##   "start" [kind "slop"|"product", key, size 0-2, risk 0-2]     "rent" [true|false]: rent out spare compute
 ##   "update" [live id]   "retire" [live id]   "cancel" [job id]   "rush" [job id]
-##   "train" []           "advertise" [campaign key]              "share" [0..1]
+##   "priority" [job id]: feed this one first (again to undo; the code being written and the training run have ids too)
+##   "train" []           "advertise" [campaign key]
 ##   "use" [model key]    "buy" [model key]    "code" [training stack component key]
 ## A refusal comes back to the asker as a notice (hud.toast).
 func request_company(action: String, args: Array = []) -> void:
@@ -1004,8 +1005,6 @@ func _h_company(action: String, args: Array) -> void:
 	var events: Array = []
 	var result := "Unknown action"
 	match [action, args.size()]:
-		["sell", 1]:
-			result = _company.sell(float(args[0]), events)
 		["start", 4]:
 			result = _company.start(str(args[0]), str(args[1]), int(args[2]), int(args[3]))
 			if result == "":
@@ -1034,8 +1033,10 @@ func _h_company(action: String, args: Array) -> void:
 			result = _company.code(str(args[0]))
 		["advertise", 1]:
 			result = _company.advertise(str(args[0]), _sim.money)
-		["share", 1]:
-			result = _company.set_share(float(args[0]))
+		["priority", 1]:
+			result = _company.prioritize(int(args[0]))
+		["rent", 1]:
+			result = _company.set_renting(bool(args[0]))
 	if result.begins_with("$"):          # the company wants money moved
 		_sim.money += float(result.substr(1))
 	elif result != "":                   # refused: tell only whoever asked
