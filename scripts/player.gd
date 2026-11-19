@@ -261,8 +261,23 @@ func _placement(held: Node3D) -> Variant:
 	if not _ray.is_colliding() or _ray.get_collision_normal().y < 0.7:
 		return null
 	var size: Vector3 = held.def["size"]
-	var yaw := rotation.y + PI + _place_turns * PI * 0.5
-	return Transform3D(Basis(Vector3.UP, yaw), _ray.get_collision_point() + Vector3.UP * (size.y * 0.5 + 0.01))
+	var basis := Basis(Vector3.UP, rotation.y + PI + _place_turns * PI * 0.5)
+	var point := _ray.get_collision_point() + Vector3.UP * (size.y * 0.5 + 0.01)
+	# If it would stick into a wall or another object, slide it back towards us until it fits.
+	var back := global_position - point
+	back.y = 0.0
+	back = back.normalized()
+	var shape := BoxShape3D.new()
+	shape.size = size * 0.96
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.collision_mask = 1 | 2
+	var space := get_world_3d().direct_space_state
+	for step in 14:
+		query.transform = Transform3D(basis, point + back * step * 0.05)
+		if space.intersect_shape(query, 1).is_empty():
+			return query.transform
+	return null
 
 
 func _place() -> void:

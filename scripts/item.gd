@@ -16,6 +16,7 @@ var sockets := 0
 var holder := 0
 var parent := 0
 var slot := 0
+var pinned := false     # placed deliberately: stays exactly put (no physics) until grabbed or unsupported
 var power_to := 0
 var net_to := 0
 var status := -1        # bit 0 powered, bit 1 online; set by the host's simulation
@@ -25,6 +26,7 @@ var _leds: Array = []
 var _target_pos := Vector3.ZERO
 var _target_rot := Quaternion.IDENTITY
 var _has_target := false
+var _pin_xf := Transform3D.IDENTITY
 
 
 func setup(p_id: int, p_kind: String) -> void:
@@ -83,11 +85,16 @@ func set_status(bits: int) -> void:
 		Catalog.set_light(mat, 2 if bits == 3 else (1 if bits & 1 else 0))
 
 
-func release(xf: Transform3D, vel: Vector3) -> void:
+func release(xf: Transform3D, vel: Vector3, pin := false) -> void:
 	holder = 0
 	parent = 0
+	pinned = pin
+	_pin_xf = xf
 	global_transform = xf
 	apply_mode()
+	# Tell the physics engine directly as well: a body that was being carried a moment ago
+	# otherwise gets its old hand position written back over the new one.
+	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
 	if not freeze:
 		linear_velocity = vel
 		angular_velocity = Vector3(randf_range(-4, 4), randf_range(-4, 4), randf_range(-4, 4)) \
@@ -105,7 +112,7 @@ func net_target(pos: Vector3, rot: Quaternion) -> void:
 ## Loose items collide with the world and each other (mask 3), never with players.
 func apply_mode() -> void:
 	_has_target = false
-	freeze = not is_loose() or not multiplayer.is_server()
+	freeze = not is_loose() or pinned or not multiplayer.is_server()
 	var loose_layer := 2 | (16 if def.get("solid", false) else 0)   # 16 = players cannot walk through
 	collision_layer = loose_layer if is_loose() else (4 if holder == 0 else 0)
 	collision_mask = 3 if is_loose() else 0
@@ -122,6 +129,9 @@ func _process(dt: float) -> void:
 			var slots: Dictionary = par.def["slots"]
 			var local := Transform3D(Basis.from_euler(Vector3(0, deg_to_rad(slots["yaw"]), 0)), slots["at"][slot])
 			global_transform = par.global_transform * local
+	elif pinned:
+		if not global_transform.is_equal_approx(_pin_xf):
+			global_transform = _pin_xf
 	elif freeze and _has_target:
 		var k := 1.0 - exp(-20.0 * dt)
 		position = position.lerp(_target_pos, k)

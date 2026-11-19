@@ -99,9 +99,9 @@ func debug_dump() -> String:
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
 	for it: Item in items.values():
-		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d speed=%.3f asleep=%s" % [
+		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d speed=%.3f asleep=%s pinned=%s" % [
 			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status,
-			it.linear_velocity.length() + it.angular_velocity.length(), it.sleeping]
+			it.linear_velocity.length() + it.angular_velocity.length(), it.sleeping, it.pinned]
 	return out
 
 
@@ -173,7 +173,7 @@ func _spawn_starting_items() -> void:
 
 
 func _spawn(kind: String, xf: Transform3D) -> void:
-	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0]])
+	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false]])
 	_next_id += 1
 
 
@@ -195,7 +195,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
 	ready_peers.append(peer)
 	_sim_step(0.0)
 
@@ -247,7 +247,7 @@ func _h_place(xf: Transform3D) -> void:
 	var p := player(peer)
 	if it == null or p == null or p.position.distance_to(xf.origin) > 5.0:
 		return
-	_cast(&"_r_release", [it.id, xf.orthonormalized(), Vector3.ZERO])
+	_cast(&"_r_place", [it.id, xf.orthonormalized()])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -321,7 +321,7 @@ func _physics_process(dt: float) -> void:
 		return
 	var batch := []
 	for it: Item in items.values():
-		if it.is_loose() and not it.sleeping:
+		if it.is_loose() and not it.pinned and not it.sleeping:
 			batch.append_array([it.id, it.position, it.quaternion])
 	if not batch.is_empty():
 		for peer: int in ready_peers:
@@ -339,11 +339,29 @@ func _sim_step(dt: float) -> void:
 				_cast(&"_r_link", [it.id, type, 0])
 				_cast(&"_r_toast", ["The %s cable of a %s got yanked out" % [
 					"power" if type == "power" else "network", it.label.to_lower()]])
+	_drop_unsupported()
 	var events: Array = []
 	var status := _sim.step(self, dt, events)
 	for text: String in events:
 		_cast(&"_r_toast", [text])
 	_cast(&"_r_sim", [_sim.money, _sim.tokens, _sim.watts, _sim.tripped, status])
+
+
+## A pinned item whose support was taken away (the crate under it got picked up...) falls.
+func _drop_unsupported() -> void:
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.collision_mask = 3
+	for it: Item in items.values():
+		if not it.pinned or not it.is_loose():
+			continue
+		var shape := BoxShape3D.new()
+		shape.size = it.def["size"] * Vector3(0.9, 1.0, 0.9)
+		query.shape = shape
+		query.transform = it.global_transform.translated(Vector3.DOWN * 0.06)
+		query.exclude = [it.get_rid()]
+		if space.intersect_shape(query, 1).is_empty():
+			_cast(&"_r_release", [it.id, it.global_transform, Vector3.ZERO])
 
 
 func _on_item_sleep(it: Item) -> void:
@@ -364,6 +382,7 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.slot = st[2]
 	it.power_to = st[3]
 	it.net_to = st[4]
+	it.pinned = st[5]
 	_items.add_child(it)
 	it.global_transform = xf
 	items[id] = it
@@ -376,6 +395,7 @@ func _r_hold(id: int, peer: int) -> void:
 	var it: Item = items.get(id)
 	if it:
 		it.parent = 0
+		it.pinned = false
 		it.holder = peer
 		it.apply_mode()
 
@@ -385,6 +405,14 @@ func _r_release(id: int, xf: Transform3D, vel: Vector3) -> void:
 	var it: Item = items.get(id)
 	if it:
 		it.release(xf, vel)
+
+
+## Placed deliberately: pinned exactly at xf, no physics, so it cannot tip off a shelf edge.
+@rpc("authority", "call_remote", "reliable")
+func _r_place(id: int, xf: Transform3D) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.release(xf, Vector3.ZERO, true)
 
 
 @rpc("authority", "call_remote", "reliable")

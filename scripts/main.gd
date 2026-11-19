@@ -103,8 +103,16 @@ func _selftest() -> void:
 		if it.kind == "rack":
 			world.request_grab(server.id)
 			world.request_attach(it.id)
-	# precise placement: put a crate on the middle shelf board
+	# placement through the real key path: carry the server, look at the front edge of the
+	# middle shelf board and press E
 	await get_tree().create_timer(0.5).timeout
-	world.player(1).position = Vector3(2.5, 0, -1.0)
-	world.request_grab(by_kind["crate"].id)
-	world.request_place(Transform3D(Basis(), Vector3(4.13, 1.26, -1.5)))
+	var me: Node3D = world.player(1)
+	me.position = Vector3(2.5, 0, -1.0)
+	me.rotation.y = -PI / 2
+	me.head.rotation.x = -0.24
+	world.request_grab(server.id)
+	await get_tree().create_timer(0.6).timeout
+	var key := InputEventKey.new()
+	key.physical_keycode = KEY_E
+	key.pressed = true
+	Input.parse_input_event(key)
