@@ -55,3 +55,13 @@ bigger map, a hardware store you walk to.
 Built: one dim always-on bulb per room; floor lamps you buy and have to power.
 Open (owner undecided): whether room lights should need power at all. Going dark when the power
 fails is funny, but being unable to see is annoying.
+
+## Beyond real hardware (the invented tiers)
+Everything in the shop today is a parody of something that exists. The late game should leave reality behind:
+- Tier 6 and up: made-up GPUs (wafer-scale cards, photonic cards, a card that needs its own substation), CPUs with
+  absurd core counts, DDR6/DDR7 and stranger memory (holographic sticks, RAM that must be kept frozen).
+- Machines to hold them: immersion tanks you lower servers into, a cryo rack, a containerised datacenter delivered by
+  truck, eventually an orbital rack where cooling is free and cables are not.
+- Power and cooling to match: the planned coal, fission and fusion reactors, then invented ones (a pocket tokamak,
+  something the neighbours really should not know about); cooling with liquid nitrogen, a pond, the town's river.
+- Each invented step should bring one new way to fail, in the spirit of the rest: funny and recoverable.

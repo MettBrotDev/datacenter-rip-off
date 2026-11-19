@@ -702,7 +702,7 @@ func _gist(def: Dictionary) -> String:
 	if def.has("psu"):
 		return "%s  ·  %d W supply" % [_slot_summary(def), def["psu"]]
 	if def.has("gb"):
-		return "%d GB" % def["gb"]
+		return "%d GB  ·  %s" % [def["gb"], Catalog.RAM_NAMES[def["ram"]]]
 	if def.has("slots"):
 		return "Holds %s" % _slot_summary(def)
 	if def.has("sensor"):
@@ -731,6 +731,9 @@ func _facts(def: Dictionary) -> Array:
 		rows.append(["Sockets", "%d (%s)" % [def["sockets"], {"power": "power", "net": "network", "coolant": "coolant hose"}[def["provides"]]]])
 	if def.has("slots"):
 		rows.append(["Slots", _slot_summary(def)])
+	if def.has("psu") and def.has("ram"):
+		var speed: float = Catalog.RAM_SPEED[def["ram"]]
+		rows.append(["Memory type", "%s%s" % [Catalog.RAM_NAMES[def["ram"]], "" if is_equal_approx(speed, 1.0) else "  (GPUs %+d%%)" % roundi((speed - 1.0) * 100.0)]])
 	if def.has("psu"):
 		rows.append(["Power supply", "%s W" % UI.num(def["psu"])])
 		rows.append(["Takes parts up to", "tier %d" % def["max_tier"]])
@@ -740,6 +743,7 @@ func _facts(def: Dictionary) -> Array:
 		rows.append(["Needs", "%d GB of RAM" % def["needs_ram"]])
 	if def.has("gb"):
 		rows.append(["Memory", "%d GB" % def["gb"]])
+		rows.append(["Type", "%s: only fits %s boards" % [Catalog.RAM_NAMES[def["ram"]], Catalog.RAM_NAMES[def["ram"]]]])
 	if def.get("group", "") == "cpu":
 		rows.append(["Feeds GPUs up to", "tier %d at full speed" % (def["tier"] + 1)])
 	if def.get("group", "") in ["cpu", "ram", "gpu"]:

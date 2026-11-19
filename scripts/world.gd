@@ -159,7 +159,7 @@ func held_by(peer: int) -> Item:
 
 ## Test aid (host): two opened machines full of parts on the driveway, to look at.
 func debug_bench() -> void:
-	var builds := [["server", Vector3(-0.45, 0.3, 6.0), ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070", "gpu_1080"]],
+	var builds := [["server", Vector3(-0.45, 0.3, 6.0), ["cpu_ryzer", "ram_d3_16", "ram_d3_16", "gpu_4070", "gpu_1080"]],
 		["server_4u", Vector3(0.45, 0.3, 6.0), ["cpu_xenon", "cpu_xenon", "ram_64", "ram_64", "ram_64", "gpu_a100", "gpu_a100", "gpu_4090"]]]
 	for build: Array in builds:
 		var machine_id := _next_id
@@ -195,13 +195,24 @@ func debug_cables() -> void:
 
 ## Host, every physics tick: a delicate part that lands hard breaks; a machine that does may lose parts inside.
 func _feel_impact(it: Item) -> void:
-	var before := it.last_vel
-	var now := it.linear_velocity if it.is_loose() and not it.pinned else Vector3.ZERO
-	it.last_vel = now
-	if before.length() < Catalog.HIT_SAFE or not it.is_loose():
+	if not it.is_loose() or it.pinned:
+		it.last_vel = Vector3.ZERO
 		return
-	var hit := (before - now).length()
-	if hit < Catalog.HIT_SAFE or randf() > inverse_lerp(Catalog.HIT_SAFE, Catalog.HIT_SURE, hit):
+	# `last_vel` is the fastest it went in the last few ticks: a landing can take two or three ticks to stop it.
+	var now := it.linear_velocity
+	if now.length() >= it.last_vel.length():
+		it.last_vel = now
+		it.slowing = 0
+		return
+	it.slowing += 1
+	if it.slowing < 3:   # give the landing three ticks to take its speed away
+		return
+	var hit := it.last_vel.length() - now.length()
+	it.last_vel = now
+	it.slowing = 0
+	if hit < Catalog.HIT_SAFE:
+		return
+	if randf() > inverse_lerp(Catalog.HIT_SAFE, Catalog.HIT_SURE, hit):
 		return
 	var who: String = it.thrown_by if it.thrown_by != "" else "Somebody"
 	if it.def.get("group", "") in DELICATE and not it.dead and not it.broken:
@@ -367,6 +378,9 @@ func attach_problem(child: Item, par: Item) -> String:
 		return "A %s has no place for that" % par.label.to_lower()
 	if child.def.get("tier", 0) > par.def.get("max_tier", 99):
 		return "Too advanced for this chassis: it takes parts up to tier %d, this is tier %d" % [par.def["max_tier"], child.def["tier"]]
+	if group == "ram" and child.def.get("ram", "") != par.def.get("ram", child.def.get("ram", "")):
+		return "Wrong memory: this is %s, the board takes %s. The notch is in a different place." % [
+			Catalog.RAM_NAMES[child.def["ram"]], Catalog.RAM_NAMES[par.def["ram"]]]
 	if par.def.get("lid", false) and not par.opened:
 		return "The lid is screwed on. Open it with a screwdriver."
 	if free_slot(par, group) < 0:
@@ -947,7 +961,8 @@ func _h_unpack(id: int) -> void:
 				_cast(&"_r_toast", ["That is not a %s. It is a %s. The note says \"close enough\"." % [
 					advertised, Catalog.ITEMS[inside]["label"].to_lower()]])
 			"bonus":
-				for kind: String in ["cpu_celery", "ram_8"]:
+				var stick: String = {"ddr4": "ram_16", "ddr5": "ram_d5_32", "rdimm": "ram_64"}.get(thing.def.get("ram", ""), "ram_8")
+				for kind: String in ["cpu_celery", stick]:
 					var slot := free_slot(thing, Catalog.ITEMS[kind]["group"])
 					if slot >= 0:
 						_cast(&"_r_spawn", [_next_id, kind, thing.global_transform, [0, thing.id, slot, 0, 0, false, "", 0, 0, false]])
@@ -1652,7 +1667,7 @@ func debug_showroom(raise := 1.0) -> void:
 		for i in counts.get("cpu", 0):
 			picks.append(cpu_ok[cpu_ok.size() - 1])
 		for i in counts.get("ram", 0):
-			picks.append("ram_16" if tier < 3 else ("ram_64" if tier < 5 else "ram_256"))
+			picks.append({"ddr3": "ram_d3_16", "ddr4": "ram_32", "ddr5": "ram_d5_64"}.get(Catalog.ITEMS[m]["ram"], "ram_64" if tier < 5 else "ram_256"))
 		for i in counts.get("gpu", 0):
 			picks.append(gpu_ok[(gpu_ok.size() - 1 - i) % gpu_ok.size()])
 		fill[m] = picks

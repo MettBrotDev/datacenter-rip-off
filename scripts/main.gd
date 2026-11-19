@@ -660,6 +660,9 @@ func _selftest() -> void:
 		sticks.append(world.items[world._next_id - 1])
 		world._cast(&"_r_release", [sticks[i].id, Transform3D(Basis(), Vector3(-2.0 + i, 1.2, 14.0)),
 			Vector3(0, -11.0 if i == 1 else 0.0, 0)])
+	var towers: Array = world.items.values().filter(func(it: Node3D) -> bool: return it.kind == "server")
+	if not towers.is_empty():
+		print("CHECK DDR4 stick into the old DDR3 tower: %s" % world.attach_problem(sticks[0], towers[0]))
 	me.position = Vector3(5, 0, 14)
 	await _wait(1.5)
 	var after_fall: Array = sticks.map(func(it: Node3D) -> bool: return it.dead)

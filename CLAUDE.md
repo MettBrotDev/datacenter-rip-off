@@ -49,6 +49,9 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   RAM or more watts than the power supply = no boot; each GPU needs free RAM; a CPU more than one
   tier below a GPU halves it; each chassis has a `max_tier`. Swapping parts with the power on can
   kill them. Machines make tokens while powered AND online.
+- Memory has generations (`Catalog.RAM_TYPE`: ddr3, ddr4, ddr5, rdimm = server grade). Every machine takes exactly
+  one and a stick of another does not fit (`world.attach_problem`); `RAM_SPEED` scales what the GPUs make
+  (DDR3 -10%, DDR4 0, DDR5 +6%, RDIMM +12%). The used starter machines are DDR3.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
 - Heat uses believable numbers. Rooms: every watt used in a building warms its air (`sim._room_step`);
   doors, fans, air conditioners cool it. Chips (`Item.heat` on servers): about 48 C above the room when

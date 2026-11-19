@@ -55,7 +55,7 @@ const STEP_WALK := 0.15          # chance that walking over a part on the floor 
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
 const SHOP: Array[String] = ["mini_pc", "server_frame", "server_ws", "server_2u", "server_wslc", "server_4u", "server_pod",
 	"cpu_pentum", "cpu_celery", "cpu_ryzer", "cpu_ryzer7", "cpu_thread", "cpu_corei9", "cpu_xenon", "cpu_xenonp", "cpu_epycc", "cpu_bergamo",
-	"ram_4", "ram_16", "ram_32", "ram_64", "ram_128", "ram_256", "ram_512",
+	"ram_4", "ram_d3_16", "ram_16", "ram_32", "ram_d5_32", "ram_d5_64", "ram_64", "ram_128", "ram_256", "ram_512",
 	"gpu_580", "gpu_1650", "gpu_4060", "gpu_4070", "gpu_4070ti", "gpu_4080", "gpu_4090", "gpu_6000",
 	"gpu_l40s", "gpu_5090", "gpu_a100", "gpu_mi300", "gpu_h100", "gpu_b200", "screwdriver",
 	"powerstrip", "switch", "rack_half", "rack", "rack_tall", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
@@ -93,9 +93,12 @@ const SHOP_INFO: Dictionary = {
 	"cpu_xenon": ["compute", "Server silicon. The box says Gold; the price agrees.", "cpu"],
 	"cpu_epycc": ["compute", "Ninety-six cores. Feeds a rack of H100s without blinking.", "cpu"],
 	"ram_8": ["compute", "One used stick. Somebody else's browser tabs are probably still in it.", "memory"],
-	"ram_16": ["compute", "Sixteen gigabytes. Enough for a 4070 to stretch its legs.", "memory"],
+	"ram_16": ["compute", "Sixteen gigabytes of DDR4. Enough for a 4070 to stretch its legs.", "memory"],
+	"ram_d3_16": ["compute", "The biggest DDR3 stick anyone ever bothered to make. Old boards love it, nothing else fits it.", "memory"],
+	"ram_d5_32": ["compute", "DDR5: a bit quicker, a bit dearer, and the notch is somewhere else again.", "memory"],
+	"ram_d5_64": ["compute", "Sixty-four gigabytes of DDR5 on one stick. Four of them and a workstation stops complaining.", "memory"],
 	"ram_32": ["compute", "Thirty-two gigabytes, which is what a 4090 asks for.", "memory"],
-	"ram_64": ["compute", "Sixty-four gigabytes. Datacenter cards will not start for less.", "memory"],
+	"ram_64": ["compute", "Registered server memory with error correction. Server boards take nothing else.", "memory"],
 	"ram_256": ["compute", "A quarter of a terabyte on one stick. Server boards only want the best.", "memory"],
 	"screwdriver": ["workshop", "Opens server lids. Without it your parts are decorations."],
 	"gpu_1080": ["compute", "Somebody mined on this for six years. It still works. Usually.", "gpu"],
@@ -162,7 +165,28 @@ const WEATHER: Array[Dictionary] = [
 		"news": "It's raining: solar panels produce nothing, and electronics left outside will be ruined"},
 ]
 
-static var ITEMS: Dictionary = _build()
+## Memory comes in generations that do not fit each other's slots (the notch is in a different place).
+## Every machine takes exactly one; faster memory feeds the cards a little better.
+const RAM_NAMES := {"ddr3": "DDR3", "ddr4": "DDR4", "ddr5": "DDR5", "rdimm": "server RDIMM"}
+const RAM_SPEED := {"ddr3": 0.9, "ddr4": 1.0, "ddr5": 1.06, "rdimm": 1.12}   # multiplies what the GPUs make
+const RAM_TYPE := {
+	"ram_4": "ddr3", "ram_8": "ddr3", "ram_d3_16": "ddr3",
+	"ram_16": "ddr4", "ram_32": "ddr4",
+	"ram_d5_32": "ddr5", "ram_d5_64": "ddr5",
+	"ram_64": "rdimm", "ram_128": "rdimm", "ram_256": "rdimm", "ram_512": "rdimm",
+	"pc_office": "ddr3", "server": "ddr3",
+	"mini_pc": "ddr4", "server_frame": "ddr4", "server_ws": "ddr4",
+	"server_wslc": "ddr5",
+	"server_2u": "rdimm", "server_4u": "rdimm", "server_pod": "rdimm",
+}
+
+static var ITEMS: Dictionary = _typed(_build())
+
+
+static func _typed(items: Dictionary) -> Dictionary:
+	for kind: String in RAM_TYPE:
+		items[kind]["ram"] = RAM_TYPE[kind]
+	return items
 
 
 
@@ -864,12 +888,15 @@ static func _build() -> Dictionary:
 		"cpu_xenonp": _cpu("Xenon Platinum", 6000, 4, 4.2, 350.0, "gold"),
 		"cpu_epycc": _cpu("EPYCC 9965", 12000, 5, 5.0, 400.0),
 		"cpu_bergamo": _cpu("EPYCC Bergamo", 19000, 5, 7.2, 520.0, "dark"),
-		"ram_8": _ram("8 GB stick (used)", 20, 8),
-		"ram_4": _ram("4 GB stick", 15, 4),
-		"ram_16": _ram("16 GB stick", 60, 16),
-		"ram_32": _ram("32 GB stick", 150, 32),
-		"ram_64": _ram("64 GB stick", 400, 64),
-		"ram_128": _ram("128 GB kit", 900, 128),
+		"ram_8": _ram("8 GB DDR3 stick (used)", 20, 8),
+		"ram_4": _ram("4 GB DDR3 stick", 15, 4),
+		"ram_d3_16": _ram("16 GB DDR3 stick", 45, 16),
+		"ram_16": _ram("16 GB DDR4 stick", 60, 16),
+		"ram_32": _ram("32 GB DDR4 stick", 150, 32),
+		"ram_d5_32": _ram("32 GB DDR5 stick", 210, 32),
+		"ram_d5_64": _ram("64 GB DDR5 stick", 480, 64),
+		"ram_64": _ram("64 GB RDIMM", 400, 64),
+		"ram_128": _ram("128 GB RDIMM", 900, 128),
 		"ram_256": _ram("256 GB RDIMM", 2000, 256),
 		"ram_512": _ram("512 GB LRDIMM", 4600, 512),
 		# GPU balance: tier / price / tokens per second / watts / RAM it needs / dollars per token-per-second.

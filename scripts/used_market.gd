@@ -286,7 +286,8 @@ func _rig() -> Array:
 				if d["tier"] <= def["max_tier"] and (not d.get("liquid", false) or def.get("coolant_port", false)):
 					gpus.append(kind)
 			"ram":
-				rams.append(kind)
+				if d.get("ram", "") == def.get("ram", ""):
+					rams.append(kind)
 	if cpus.is_empty() or rams.is_empty() or room["cpu"] == 0 or room["ram"] == 0:
 		return []
 	var parts: Array = []

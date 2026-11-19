@@ -522,7 +522,7 @@ static func machine_report(machine: Node3D, parts: Array, ruined: Dictionary = {
 		var held_back: bool = best < gpu.def["tier"] - 1
 		if held_back:
 			out["notes"].append("%s runs at half speed: the CPU cannot keep up with it" % gpu.label)
-		out["tokens"] += gpu.def["tokens"] * (0.5 if held_back else 1.0)
+		out["tokens"] += gpu.def["tokens"] * (0.5 if held_back else 1.0) * float(Catalog.RAM_SPEED.get(def.get("ram", ""), 1.0))
 		out["cards"].append(gpu)
 		out["running"][gpu.id] = true
 	return out
