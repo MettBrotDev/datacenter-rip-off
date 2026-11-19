@@ -43,10 +43,10 @@ const START_MONEY := 1500.0
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
-const SHOP: Array[String] = ["pc_office", "server", "server_ws", "server_4u", "server_pod",
+const SHOP: Array[String] = ["server_ws", "server_4u", "server_pod",
 	"cpu_celery", "cpu_ryzer", "cpu_thread", "cpu_xenon", "cpu_epycc",
-	"ram_8", "ram_16", "ram_32", "ram_64", "ram_256",
-	"gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100", "screwdriver",
+	"ram_16", "ram_32", "ram_64", "ram_256",
+	"gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100", "screwdriver",
 	"powerstrip", "switch", "rack", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
 	"thermometer", "sensor_power", "sensor_coolant", "screen",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
@@ -62,7 +62,7 @@ const CATEGORIES: Array[Dictionary] = [
 	{"key": "workshop", "name": "Workshop", "icon": "build", "color": "grey"},
 ]
 
-## For every part in SHOP: [category key, what the shop says about it].
+## For every part in SHOP (and the used market's staples): [category key, what the shop says about it].
 const GROUP_NAMES := {"cpu": "CPU", "ram": "RAM", "gpu": "GPU", "server": "server"}
 
 const SHOP_INFO: Dictionary = {

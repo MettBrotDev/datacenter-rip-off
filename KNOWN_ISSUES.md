@@ -10,7 +10,7 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Neighbours just stand by their door; they do not react to anything except offers.
 - A neighbour who sold their house simply vanishes.
 - Demolition is instant: no animation, no rubble, no cost.
-- Furniture cannot be sold or thrown away for money.
+- Furniture and hardware sell at the pick-up pallet for a fixed share of the price; nothing is haggled there.
 - Houses have no back door and no upstairs.
 - A demolished house leaves an open pad: with rain ruining electronics, a pad is only usable for
   generators until there is something to build a roof with.
@@ -38,7 +38,7 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Power supplies are part of the chassis and cannot be swapped. Machines have no storage drives.
 - Hardware models are still plain boxes; a remodel is planned once the rendering pass is in.
 - Fire does not hurt players, walls or houses, only items. Extinguishers never run out.
-- Ruined hardware cannot be repaired or sold, only thrown in the dumpster.
+- Ruined hardware cannot be repaired. It sells for scrap pennies at the pick-up pallet, or goes in the dumpster.
 - Only sprinting trips over cables; there is no falling animation, just a stumble.
 
 - The economy is unbalanced: every number in `company_data.gd` is a first guess that nobody has played.

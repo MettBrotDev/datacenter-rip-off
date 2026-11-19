@@ -5,6 +5,7 @@ extends Control
 
 const UI = preload("res://scripts/ui.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const UsedMarket = preload("res://scripts/used_market.gd")
 const COLORS := {"purple": UI.PURPLE, "amber": UI.AMBER, "cyan": UI.CYAN, "blue": UI.ACCENT, "green": UI.GREEN, "grey": UI.DIM}
 
 
@@ -25,6 +26,21 @@ var _detail: VBoxContainer        # rebuilt whenever another part is selected
 var _count_label: Label
 var _total: Label
 var _buy: Button
+var _mode := "new"                # "new" or "used"
+var _mode_buttons: Dictionary = {}
+var _new_body: HBoxContainer
+var _used_body: HBoxContainer
+var _staple_grid: GridContainer
+var _offer_grid: GridContainer
+var _offer_note: Label
+var _used_cards: Dictionary = {}  # "s:kind" or "l:id" -> {"panel", "price", "left"}
+var _used_ids: Array = []         # the listing ids the offer grid was built for
+var _used_sel := ""
+var _used_sel_price := -1
+var _used_detail: VBoxContainer
+var _used_buy: Button
+var _used_haggle: Button
+var _used_left: Label
 
 
 func _ready() -> void:
@@ -54,6 +70,18 @@ func _ready() -> void:
 	head.add_child(titles)
 	titles.add_child(UI.bold("Parts market", 28))
 	titles.add_child(UI.caption("Everything arrives as a parcel on the driveway. Unpack it before it rains. No refunds."))
+	var modes := HBoxContainer.new()   # New / Second-hand
+	modes.add_theme_constant_override("separation", 6)
+	modes.size_flags_vertical = SIZE_SHRINK_CENTER
+	head.add_child(modes)
+	var mode_group := ButtonGroup.new()
+	for mode: Array in [["new", "New", "inventory_2"], ["used", "Second-hand", "recycling"]]:
+		var mb := UI.choice_button("%s  %s" % [UI.ic(mode[2]), mode[1]], mode_group)
+		mb.custom_minimum_size = Vector2(170, 44)
+		mb.button_pressed = mode[0] == _mode
+		mb.pressed.connect(set_mode.bind(mode[0]))
+		modes.add_child(mb)
+		_mode_buttons[mode[0]] = mb
 	var cash := VBoxContainer.new()
 	cash.add_theme_constant_override("separation", -2)
 	head.add_child(cash)
@@ -70,9 +98,11 @@ func _ready() -> void:
 	v.add_child(UI.rule())
 
 	var body := HBoxContainer.new()
+	_new_body = body
 	body.add_theme_constant_override("separation", 16)
 	body.size_flags_vertical = SIZE_EXPAND_FILL
 	v.add_child(body)
+	_build_used(v)
 
 	# left: categories
 	var side := VBoxContainer.new()
@@ -95,7 +125,7 @@ func _ready() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_vertical = SIZE_EXPAND_FILL
 	side.add_child(spacer)
-	var note := UI.wrap(UI.caption("Used parts are cheap for a reason. Electronics hate rain. Things with no fans need water."))
+	var note := UI.wrap(UI.caption("Everything here is new. For cheaper and riskier, try the second-hand market. Electronics hate rain. Things with no fans need water."))
 	side.add_child(note)
 
 	# middle: the parts
@@ -138,6 +168,8 @@ func set_money(money: float) -> void:
 		var affordable: bool = Catalog.ITEMS[kind]["price"] <= money
 		_cards[kind]["price"].add_theme_color_override("font_color", UI.GREEN if affordable else UI.RED)
 	_refresh_buy()
+	if _mode == "used":
+		_sync_used()
 
 
 # --- building blocks ----------------------------------------------------------------------
@@ -190,37 +222,7 @@ func _select(kind: String) -> void:
 			UI.box(Color(UI.ACCENT.r, UI.ACCENT.g, UI.ACCENT.b, 0.16), 11, UI.ACCENT, 12))
 	for child in _detail.get_children():
 		child.queue_free()
-	var def: Dictionary = Catalog.ITEMS[kind]
-	var cat := _cat(kind)
-
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 12)
-	_detail.add_child(head)
-	head.add_child(UI.chip(cat["icon"], COLORS[cat["color"]], 52))
-	var names := VBoxContainer.new()
-	names.add_theme_constant_override("separation", 0)
-	names.size_flags_horizontal = SIZE_EXPAND_FILL
-	head.add_child(names)
-	names.add_child(UI.wrap(UI.bold(def["label"], 22)))
-	names.add_child(UI.caption(cat["name"].to_upper()))
-	_detail.add_child(UI.wrap(UI.label(Catalog.SHOP_INFO[kind][1], 15, UI.DIM)))
-	_detail.add_child(UI.rule())
-
-	for row: Array in _facts(def):
-		var line := HBoxContainer.new()
-		var key := UI.label(row[0], 15, UI.DIM)
-		key.size_flags_horizontal = SIZE_EXPAND_FILL
-		line.add_child(key)
-		line.add_child(UI.bold(row[1], 15))
-		_detail.add_child(line)
-	var warnings := _warnings(def)
-	if not warnings.is_empty():
-		var pills := HFlowContainer.new()
-		pills.add_theme_constant_override("h_separation", 6)
-		pills.add_theme_constant_override("v_separation", 6)
-		_detail.add_child(pills)
-		for warning: Array in warnings:
-			pills.add_child(UI.pill(warning[0], warning[1]))
+	_detail_part(_detail, kind, Catalog.SHOP_INFO[kind][1], [])
 
 	var spacer := Control.new()
 	spacer.size_flags_vertical = SIZE_EXPAND_FILL
@@ -282,6 +284,262 @@ func _purchase() -> void:
 		world.request_buy(_selected)
 	_count = 1
 	_refresh_buy()
+
+
+## Name, blurb, facts and warning pills of a part, into `box`. `extra` = more pills [[text, colour]].
+func _detail_part(box: VBoxContainer, kind: String, blurb: String, extra: Array) -> void:
+	var def: Dictionary = Catalog.ITEMS[kind]
+	var cat := _cat(kind)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	box.add_child(head)
+	head.add_child(UI.chip(cat["icon"], COLORS[cat["color"]], 52))
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", 0)
+	names.size_flags_horizontal = SIZE_EXPAND_FILL
+	head.add_child(names)
+	names.add_child(UI.wrap(UI.bold(def["label"], 22)))
+	names.add_child(UI.caption(cat["name"].to_upper()))
+	box.add_child(UI.wrap(UI.label(blurb, 15, UI.DIM)))
+	box.add_child(UI.rule())
+	for row: Array in _facts(def):
+		var line := HBoxContainer.new()
+		var key := UI.label(row[0], 15, UI.DIM)
+		key.size_flags_horizontal = SIZE_EXPAND_FILL
+		line.add_child(key)
+		line.add_child(UI.bold(row[1], 15))
+		box.add_child(line)
+	var warnings := _warnings(def) + extra
+	if not warnings.is_empty():
+		var pills := HFlowContainer.new()
+		pills.add_theme_constant_override("h_separation", 6)
+		pills.add_theme_constant_override("v_separation", 6)
+		box.add_child(pills)
+		for warning: Array in warnings:
+			pills.add_child(UI.pill(warning[0], warning[1]))
+
+
+# --- the second-hand market -------------------------------------------------------------------
+
+func set_mode(mode: String) -> void:
+	_mode = mode
+	_new_body.visible = mode == "new"
+	_used_body.visible = mode == "used"
+	if _mode_buttons.has(mode):
+		_mode_buttons[mode].button_pressed = true
+	if mode == "used":
+		_sync_used()
+
+
+func _build_used(parent: VBoxContainer) -> void:
+	_used_body = HBoxContainer.new()
+	_used_body.add_theme_constant_override("separation", 16)
+	_used_body.size_flags_vertical = SIZE_EXPAND_FILL
+	_used_body.visible = false
+	parent.add_child(_used_body)
+	var middle := VBoxContainer.new()
+	middle.size_flags_horizontal = SIZE_EXPAND_FILL
+	middle.add_theme_constant_override("separation", 8)
+	_used_body.add_child(middle)
+	var scroll := UI.scroll()
+	scroll.size_flags_vertical = SIZE_EXPAND_FILL
+	middle.add_child(scroll)
+	var column := VBoxContainer.new()
+	column.size_flags_horizontal = SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", 8)
+	scroll.add_child(column)
+	column.add_child(UI.section("Always in stock", "Same cheap beginner parts, same odds: 1 in 8 is dead on arrival.", "inventory", UI.ACCENT))
+	_staple_grid = _used_grid()
+	column.add_child(_staple_grid)
+	for kind: String in UsedMarket.STAPLES:
+		_staple_grid.add_child(_used_card("s:" + kind, kind))
+	column.add_child(UI.section("Offers from the neighbourhood", "They come and go. Nobody has checked the photos.", "storefront", UI.AMBER))
+	_offer_grid = _used_grid()
+	column.add_child(_offer_grid)
+	_offer_note = UI.wrap(UI.caption("No offers right now. Check back in a minute."))
+	column.add_child(_offer_note)
+	var panel := UI.inset(18, 12)
+	panel.custom_minimum_size.x = 360
+	_used_body.add_child(panel)
+	_used_detail = VBoxContainer.new()
+	_used_detail.add_theme_constant_override("separation", 10)
+	panel.add_child(_used_detail)
+	_select_used("s:" + UsedMarket.STAPLES[0])
+
+
+func _used_grid() -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.size_flags_horizontal = SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	return grid
+
+
+## What is behind a card key: {"kind", "price", "was", "seller", "text", "left" (-1 = always)} or {}.
+func _used_entry(key: String) -> Dictionary:
+	var kind := key.substr(2)
+	if key.begins_with("s:"):
+		return {"kind": kind, "price": Catalog.ITEMS[kind]["price"], "was": 0, "seller": UsedMarket.STAPLE_SELLER,
+			"text": Catalog.SHOP_INFO[kind][1], "left": -1.0, "haggled": true, "staple": true}
+	if world == null:
+		return {}
+	for l: Dictionary in world.used.get("listings", []):
+		if str(l["id"]) == kind:
+			return l
+	return {}
+
+
+func _used_card(key: String, kind: String) -> PanelContainer:
+	var def: Dictionary = Catalog.ITEMS[kind]
+	var cat := _cat(kind)
+	var entry := _used_entry(key)
+	var panel := UI.inset(12, 11)
+	panel.size_flags_horizontal = SIZE_EXPAND_FILL
+	panel.custom_minimum_size.y = 150
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	panel.add_child(v)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 10)
+	v.add_child(top)
+	top.add_child(UI.chip(cat["icon"], COLORS[cat["color"]], 34))
+	var name_label := UI.wrap(UI.bold(def["label"], 15))
+	name_label.size_flags_horizontal = SIZE_EXPAND_FILL
+	top.add_child(name_label)
+	var seller := UI.caption(entry.get("seller", ""))
+	seller.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	v.add_child(seller)
+	var text := UI.wrap(UI.caption(entry.get("text", "")))
+	text.max_lines_visible = 2
+	text.size_flags_vertical = SIZE_EXPAND_FILL
+	v.add_child(text)
+	var bottom := HBoxContainer.new()
+	v.add_child(bottom)
+	var price := UI.big("", UI.GREEN, 19)
+	bottom.add_child(price)
+	var left := UI.caption("")
+	left.size_flags_horizontal = SIZE_EXPAND_FILL
+	left.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	bottom.add_child(left)
+	UI.click_card(panel, _select_used.bind(key))
+	_used_cards[key] = {"panel": panel, "price": price, "left": left}
+	_update_used_card(key)
+	return panel
+
+
+func _update_used_card(key: String) -> void:
+	var entry := _used_entry(key)
+	if entry.is_empty():
+		return
+	var kind: String = entry["kind"]
+	var card: Dictionary = _used_cards[key]
+	card["price"].text = UI.money(entry["price"]) if entry.get("staple", false) else "%s   new %s" % [UI.money(entry["price"]), UI.money(Catalog.ITEMS[kind]["price"])]
+	card["price"].add_theme_color_override("font_color", UI.GREEN if entry["price"] <= _money else UI.RED)
+	card["left"].text = "" if entry["left"] < 0.0 else UI.mmss(entry["left"])
+
+
+## Called whenever the balance is: rebuilds the offer cards only when the offers changed.
+func _sync_used() -> void:
+	var listings: Array = world.used.get("listings", []) if world != null else []
+	var ids := listings.map(func(l: Dictionary) -> int: return l["id"])
+	if ids != _used_ids:
+		_used_ids = ids
+		for key: String in _used_cards.keys():
+			if key.begins_with("l:"):
+				_used_cards[key]["panel"].queue_free()
+				_used_cards.erase(key)
+		for l: Dictionary in listings:
+			_offer_grid.add_child(_used_card("l:%d" % l["id"], l["kind"]))
+		_offer_note.visible = listings.is_empty()
+		if _used_entry(_used_sel).is_empty():
+			_select_used("s:" + UsedMarket.STAPLES[0])
+	for key: String in _used_cards:
+		_update_used_card(key)
+	var entry := _used_entry(_used_sel)
+	if not entry.is_empty():
+		if int(entry["price"]) != _used_sel_price:
+			_select_used(_used_sel)
+		_refresh_used_buy(entry)
+
+
+func _select_used(key: String) -> void:
+	var old: Dictionary = _used_cards.get(_used_sel, {})
+	if not old.is_empty():
+		old["panel"].add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, 11, UI.BORDER, 12))
+	var entry := _used_entry(key)
+	if entry.is_empty():
+		return
+	_used_sel = key
+	_used_sel_price = int(entry["price"])
+	_used_cards[key]["panel"].add_theme_stylebox_override("panel",
+			UI.box(Color(UI.ACCENT.r, UI.ACCENT.g, UI.ACCENT.b, 0.16), 11, UI.ACCENT, 12))
+	for child in _used_detail.get_children():
+		child.queue_free()
+	var kind: String = entry["kind"]
+	var staple: bool = entry.get("staple", false)
+	_detail_part(_used_detail, kind, Catalog.SHOP_INFO[kind][1], [] if staple else
+			[["Condition: found out when unpacked", UI.AMBER], ["No refunds", UI.DIM]])
+	_used_detail.add_child(UI.rule())
+	var seller := HBoxContainer.new()
+	_used_detail.add_child(seller)
+	var seller_key := UI.label("Seller", 15, UI.DIM)
+	seller_key.size_flags_horizontal = SIZE_EXPAND_FILL
+	seller.add_child(seller_key)
+	seller.add_child(UI.bold(entry["seller"], 15))
+	if not staple:
+		_used_detail.add_child(UI.wrap(UI.label("\"%s\"" % entry["text"], 15, UI.AMBER)))
+	var spacer := Control.new()
+	spacer.size_flags_vertical = SIZE_EXPAND_FILL
+	_used_detail.add_child(spacer)
+	_used_detail.add_child(UI.rule())
+	var price_row := HBoxContainer.new()
+	_used_detail.add_child(price_row)
+	var price_key := UI.label("Asking price", 15, UI.DIM)
+	price_key.size_flags_horizontal = SIZE_EXPAND_FILL
+	price_row.add_child(price_key)
+	var new_price: float = Catalog.ITEMS[kind]["price"]
+	price_row.add_child(UI.big(UI.money(entry["price"]), UI.GREEN, 26))
+	var off := int(round((1.0 - entry["price"] / new_price) * 100.0))
+	_used_detail.add_child(UI.caption("Catalog price, new or not." if staple else "New it costs %s, so this is %d%% off." % [UI.money(new_price), off]))
+	_used_left = UI.caption("")
+	_used_detail.add_child(_used_left)
+	_used_haggle = UI.btn(UI.ic("handshake") + "  Offer less", "secondary", 16)
+	_used_haggle.visible = not staple
+	_used_haggle.pressed.connect(_haggle)
+	_used_detail.add_child(_used_haggle)
+	_used_buy = UI.btn("", "primary", 17)
+	_used_buy.custom_minimum_size.y = 50
+	_used_buy.pressed.connect(_purchase_used)
+	_used_detail.add_child(_used_buy)
+	_refresh_used_buy(entry)
+
+
+func _refresh_used_buy(entry: Dictionary) -> void:
+	if _used_buy == null or not is_instance_valid(_used_buy):
+		return
+	var price: float = entry["price"]
+	_used_buy.disabled = price > _money
+	_used_buy.text = "%s  Buy it" % UI.ic("shopping_cart") if price <= _money else "You are %s short" % UI.money(price - _money)
+	_used_haggle.disabled = entry.get("haggled", true)
+	_used_left.text = "Always in stock" if entry["left"] < 0.0 else "Gone in %s, or when someone else buys it" % UI.mmss(entry["left"])
+
+
+func _purchase_used() -> void:
+	var entry := _used_entry(_used_sel)
+	if entry.is_empty():
+		return
+	if entry.get("staple", false):
+		world.request_buy_used(0, entry["kind"])
+	else:
+		world.request_buy_used(int(entry["id"]))
+
+
+func _haggle() -> void:
+	var entry := _used_entry(_used_sel)
+	if not entry.is_empty() and not entry.get("staple", false):
+		world.request_haggle_used(int(entry["id"]))
+		_used_haggle.disabled = true
 
 
 # --- what to say about a part ---------------------------------------------------------------

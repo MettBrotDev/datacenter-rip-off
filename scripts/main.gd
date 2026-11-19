@@ -14,6 +14,7 @@ extends Node
 ##   --demo                 host: give the company a few hours of history (products, a model, users)
 ##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
 ##   --shop                 open the parts market
+##   --used                 open the parts market on its second-hand side
 ##   --bench                host: put two opened, fully fitted machines on the driveway
 ##   --pitch=DEG            initial look up (+) or down (-) of the local player
 ##   --open                 host: start with the garage door open
@@ -28,6 +29,8 @@ extends Node
 const World = preload("res://scripts/world.gd")
 const Menu = preload("res://scripts/menu.gd")
 const PoseStage = preload("res://scripts/pose_stage.gd")
+const UsedMarket = preload("res://scripts/used_market.gd")
+const Catalog = preload("res://scripts/catalog.gd")
 
 var world: Node3D
 var menu: Control
@@ -114,6 +117,8 @@ func _handle_args() -> void:
 		world.player(multiplayer.get_unique_id()).head.rotation.x = deg_to_rad(float(args["pitch"]))
 	if args.has("shop") and world:
 		world.hud.open_shop()
+	if args.has("used") and world:
+		world.hud.open_used_market()
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("pose") and world:
@@ -458,6 +463,69 @@ func _selftest() -> void:
 	await _run(30.0)
 	for line: String in world.board.readings(world):
 		print("CHECK board: " + line)
+
+	# 14. the second-hand market: one listing per hidden condition, bought and unpacked for real
+	var market = world._market
+	print("CHECK used market: %d offers, staples %s" % [market.listings.size(), str(UsedMarket.STAPLES)])
+	for spec: Array in [["fine", "server_ws", ""], ["dead", "gpu_4070", ""], ["sketchy", "server_ws", ""], ["brick", "gpu_4090", ""],
+			["swapped", "gpu_4090", "gpu_1080"], ["bonus", "server_ws", ""], ["soaked", "gpu_4070", ""]]:
+		var listing: int = market.test_listing(spec[1], spec[0], spec[2])
+		var asked: float = market.find(listing)["price"]
+		var cash_before: float = world._sim.money
+		var parcels_before := _count("parcel")
+		world.request_buy_used(listing)
+		await _wait(0.4)
+		print("CHECK used %s: bought %s for $%d (new $%d), paid $%d, listing gone=%s, parcels %d -> %d" % [spec[0], spec[1], asked,
+			Catalog.ITEMS[spec[1]]["price"], cash_before - world._sim.money, market.find(listing).is_empty(), parcels_before, _count("parcel")])
+		world.player(1).position = Vector3(0, 0, 8)
+		var box: Node3D = null
+		for it: Node3D in world.items.values():
+			if it.kind == "parcel" and (box == null or it.id > box.id):
+				box = it
+		var first: int = world._next_id
+		world.request_unpack(box.id)
+		await _wait(0.2)
+		if spec[0] == "soaked":
+			await _run(4.0)
+		var got: Node3D = world.items[first]
+		var mounted := 0
+		for it: Node3D in world.items.values():
+			mounted += 1 if it.parent == got.id else 0
+		print("CHECK used %s unpacked: it is a %s, ruined=%s sketchy=%s parts inside=%d" % [spec[0], got.kind,
+			got.dead or got.broken, got.sketchy, mounted])
+	var ids_before: Array = market.listings.map(func(l: Dictionary) -> int: return l["id"])
+	market.tick(500.0, 0)
+	var ids_after: Array = market.listings.map(func(l: Dictionary) -> int: return l["id"])
+	print("CHECK used market after 500 s: offers %d -> %d, still the same ids: %d" % [ids_before.size(), ids_after.size(),
+		ids_before.filter(func(i: int) -> bool: return i in ids_after).size()])
+	var offer: Dictionary = market.listings[0] if not market.listings.is_empty() else {}
+	var asked_before: int = 0
+	if not offer.is_empty():
+		asked_before = offer["price"]
+		var said: Dictionary = market.haggle(offer["id"])
+		print("CHECK used haggle: $%d -> %s (%s)" % [asked_before, str(said.get("text", "?")), "gone" if said.get("gone", false) else "still listed"])
+	print("CHECK used market state for clients has no condition: %s" % str(not world.used["listings"].is_empty() and not world.used["listings"][0].has("cond")))
+
+	# 15. selling: a working RAM stick, a ruined GPU, a sofa and a PC with a CPU in it, on the pallet
+	var pad := Vector3(-4.6, 0.5, 8.2)
+	world._spawn("ram_16", Transform3D(Basis(), pad + Vector3(0.2, 0, -0.5)))
+	world._spawn("gpu_1080", Transform3D(Basis(), pad + Vector3(-0.2, 0, -0.4)))
+	world.items[world._next_id - 1].dead = true
+	world._spawn("sofa", Transform3D(Basis(), pad + Vector3(0, 0.2, 0.3)))
+	world._spawn("pc_office", Transform3D(Basis(), pad + Vector3(0.2, 0.9, 0.0)))
+	var pc: Node3D = world.items[world._next_id - 1]
+	world._cast(&"_r_spawn", [world._next_id, "cpu_celery", pc.global_transform, [0, pc.id, world.free_slot(pc, "cpu"), 0, 0, false, "", 0, 0, false]])
+	world._next_id += 1
+	await _wait(1.0)
+	var before_sale: float = world._sim.money
+	var count_before: int = world.items.size()
+	world.request_sell()
+	await _wait(0.3)
+	print("CHECK sold on the pallet: items %d -> %d, money +$%d (expect ram 21 + ruined gpu 12 + sofa 40 + pc 18 + cpu 21 = 112)" % [
+		count_before, world.items.size(), world._sim.money - before_sale])
+	before_sale = world._sim.money
+	world.request_sell()
+	print("CHECK empty pallet: money +$%d" % (world._sim.money - before_sale))
 	print("CHECK thermometer in the garage lets you read the room: %s" % world.temp_known_at(Vector3.ZERO))
 	me.position = Vector3(0.6, 0, 1.2)   # leave the camera looking at the big screen
 	me.rotation.y = 0.15
@@ -474,7 +542,10 @@ func _run(seconds: float) -> void:
 ## Buys things, then walks to the driveway and unpacks every parcel there.
 func _buy(kinds: Array) -> void:
 	for kind: String in kinds:
-		world.request_buy(kind)
+		if kind in UsedMarket.STAPLES:   # the cheap beginner parts moved to the second-hand market
+			world.request_buy_used(0, kind)
+		else:
+			world.request_buy(kind)
 	await _wait(0.4)
 	world.player(1).position = Vector3(0, 0, 8)
 	for it: Node3D in world.items.values().duplicate():
