@@ -4,7 +4,10 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 
 ## Gameplay
 - Players walk through all small items (GPUs, servers, strips, boxes). Deliberate for now: colliding with them made everything twitch. Only racks block you.
-- Cables are straight sagging lines: they pass through walls, racks and other objects.
+- Loose cables are sagging lines that pass through walls, racks and other objects. Pinned cables go where the
+  pins are, but a stretch between two pins is a straight line and can still cut through things.
+- Cable pins stay in mid-air if the wall they were on is demolished. Pinning by clicking has only been
+  tested through the request, never with the crosshair.
 - A placed (pinned) item ignores physics: thrown objects bounce off it and cannot knock it over.
 - Two players can stand inside each other.
 - Neighbours just stand by their door; they do not react to anything except offers.

@@ -22,7 +22,7 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - `scripts/item.gd` — physical objects: loose / held / attached-in-a-slot, plus power and net cable links
 - `scripts/fixture.gd` — wall outlets, internet uplink, breaker box, shop laptop (negative ids)
 - `scripts/sim.gd` — host-only power/network/money simulation, 2 steps per second
-- `scripts/cables.gd` — draws cables (visual only)
+- `scripts/cables.gd` — draws cables from links and pins (visual only), and says which stretch trips you
 - `scripts/garage.gd` — first location; `hud.gd`, `shop.gd`, `menu.gd`, `ui.gd` — UI
 - `scripts/settings.gd` (autoload `Settings`, saved to user://options.cfg), `settings_menu.gd`
 
@@ -33,7 +33,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   A building's load is shared between the generators feeding it, in proportion to their size.
 - Each owned building has a breaker with a wiring limit (garage 3600 W, houses 3600-7500 W by size).
 - Power and network are chains of cables: item -> provider -> ... Loops are allowed and simply dead.
-- Nothing is validated at build time except socket counts and cable length (7 m, then it gets yanked out).
+- Nothing is validated at build time except socket counts and cable length.
+- Cables can be run messy or tidy. Loose: plug straight in; the cable sags, snakes over the floor, reaches
+  7 m (`MAX_CABLE`, then it gets yanked out) and trips sprinters. Tidy: while carrying the cable end, click
+  walls/floors/ceilings to pin it (`Item.routes[type]` = pin positions, sent with `request_link`); it runs
+  straight between pins, cannot be tripped over there, and may be 40 m long in total (`MAX_ROUTED`). Only the
+  two ends stay loose. `world.route_problem()` is the one rule for both; `--cables` shows both in the garage.
 - Overloading a generator stalls it (or throws the rider off the bike); its share then lands on the others.
 - Internet comes from the garage's wall box and from the router in every house we own.
 - Machines (`psu` in the catalog: office PC, tower server, workstation, GPU server, AI pod) are

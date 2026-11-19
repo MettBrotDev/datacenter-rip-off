@@ -45,7 +45,7 @@ var items: Dictionary = {}      # item id (> 0) -> Item
 var fixtures: Dictionary = {}   # fixture id (< 0) -> Fixture
 var hud: CanvasLayer
 var ready_peers: Array = []     # host only: clients that have loaded the world
-var preview: Dictionary = {}    # cable end the local player is carrying: {"id", "type"}
+var preview: Dictionary = {}    # cable end the local player is carrying: {"id", "type", "pins"}
 var money := 0.0
 var tokens := 0.0
 var watts := 0.0
@@ -169,6 +169,26 @@ func debug_bench() -> void:
 			_next_id += 1
 	for kind: String in ["cpu_celery", "ram_8", "gpu_h100", "screwdriver"]:   # loose parts beside them
 		_spawn(kind, Transform3D(Basis(), Vector3(-0.3 + _next_id % 4 * 0.2, 0.3, 6.7)))
+
+
+## Test aid: cable up the garage both ways. Three machines dragged to the router with loose cables,
+## one with its network cable pinned neatly along the floor edge and up the wall.
+func debug_cables() -> void:
+	var by_kind := {}
+	for it: Item in items.values():
+		by_kind[it.kind] = it
+	request_link(by_kind["powerstrip"].id, "power", by_kind["gen_bike"].id)
+	request_link(by_kind["server"].id, "power", by_kind["powerstrip"].id)
+	request_link(by_kind["server"].id, "net", -3)
+	for spot: Vector3 in [Vector3(-0.6, 0.3, 0.6), Vector3(0.7, 0.3, 0.2)]:
+		var id := _next_id
+		_spawn("server", Transform3D(Basis(), spot))
+		request_link(id, "power", by_kind["powerstrip"].id)
+		request_link(id, "net", -3)
+	var neat := _next_id
+	_spawn("server", Transform3D(Basis(), Vector3(2.3, 0.3, 1.6)))
+	request_link(neat, "net", -3, [Vector3(2.3, 0.02, 1.0), Vector3(3.35, 0.02, 1.0), Vector3(3.35, 0.02, -3.3),
+		Vector3(1.7, 0.02, -3.44), Vector3(1.7, 1.3, -3.47)])
 
 
 ## Whatever a cable can be plugged into: an item (id > 0) or a fixture (id < 0).
@@ -368,8 +388,24 @@ func request_lid(id: int) -> void:
 
 
 ## provider_id 0 = unplug.
-func request_link(id: int, type: String, provider_id: int) -> void:
-	_to_host(&"_h_link", [id, type, provider_id])
+## `pins`: points in the world the cable is clipped to on its way from the item to the provider.
+func request_link(id: int, type: String, provider_id: int, pins: Array = []) -> void:
+	_to_host(&"_h_link", [id, type, provider_id, pins])
+
+
+## Why a cable cannot run from `from` through `pins` to `to` ("" if it can). A loose stretch reaches
+## MAX_CABLE; pinned along the way the whole run can be MAX_ROUTED long.
+static func route_problem(from: Vector3, pins: Array, to: Vector3) -> String:
+	if pins.is_empty():
+		return "" if from.distance_to(to) <= Catalog.MAX_CABLE else "Too far for a loose cable (%d m). Pin it along the way." % Catalog.MAX_CABLE
+	if pins.size() > Catalog.MAX_PINS:
+		return "That is enough pins for one cable"
+	if from.distance_to(pins[0]) > Catalog.MAX_CABLE or (pins[-1] as Vector3).distance_to(to) > Catalog.MAX_CABLE:
+		return "Too far from the last pin (%d m of slack at most)" % Catalog.MAX_CABLE
+	var total := from.distance_to(pins[0]) + (pins[-1] as Vector3).distance_to(to)
+	for i in pins.size() - 1:
+		total += (pins[i] as Vector3).distance_to(pins[i + 1])
+	return "" if total <= Catalog.MAX_ROUTED else "This cable is only %d m long" % Catalog.MAX_ROUTED
 
 
 func request_buy(kind: String) -> void:
@@ -575,7 +611,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened, it.routes])
 	_r_door.rpc_id(peer, door_open)
 	_r_used.rpc_id(peer, _market.state())
 	for h: House in houses.values():
@@ -678,7 +714,7 @@ func _h_lid(id: int) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _h_link(id: int, type: String, provider_id: int) -> void:
+func _h_link(id: int, type: String, provider_id: int, pins: Array) -> void:
 	if not multiplayer.is_server() or type not in LINKS:
 		return
 	var it: Item = items.get(id)
@@ -694,11 +730,14 @@ func _h_link(id: int, type: String, provider_id: int) -> void:
 			return
 		if sockets_used(provider_id, type) >= target.sockets:
 			return
-		if it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
+		for pin: Variant in pins:
+			if not pin is Vector3:
+				return
+		if route_problem(it.global_position, pins, target.global_position) != "":
 			return
 		if provider_id == id:   # allowed. It just doesn't do anything useful.
 			_cast(&"_r_toast", ["%s plugged a %s into itself" % [name_of(Net.sender()), it.label.to_lower()]])
-	_cast(&"_r_link", [id, type, provider_id])
+	_cast(&"_r_link", [id, type, provider_id, pins])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -901,7 +940,7 @@ func _unplug(it: Item, type: String, who: String) -> void:
 		else:
 			_cast(&"_r_toast", ["%s pulled out a full coolant hose. There is a puddle now." % who])
 	it.hose = 0.0
-	_cast(&"_r_link", [it.id, type, 0])
+	_cast(&"_r_link", [it.id, type, 0, []])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -1213,7 +1252,7 @@ func _sim_step(dt: float) -> void:
 			if to == 0:
 				continue
 			var target := provider(to)
-			if target == null or it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
+			if target == null or route_problem(it.global_position, it.routes.get(type, []), target.global_position) != "":
 				_cast(&"_r_toast", ["The %s of a %s got yanked out" % [LINKS[type], it.label.to_lower()]])
 				_unplug(it, type, "Somebody")
 	for puddle: Dictionary in puddles.duplicate():   # puddles dry up
@@ -1294,6 +1333,8 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.coolant_to = st[7]
 	it.worn = st[8]
 	it.opened = st[9]
+	if st.size() > 10:
+		it.routes = st[10]
 	_items.add_child(it)
 	it.global_transform = xf
 	it._pin_xf = xf
@@ -1380,10 +1421,14 @@ func _r_attach(id: int, parent_id: int, slot: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _r_link(id: int, type: String, provider_id: int) -> void:
+func _r_link(id: int, type: String, provider_id: int, pins: Array) -> void:
 	var it: Item = items.get(id)
 	if it:
 		it.set_link(type, provider_id)
+		if pins.is_empty():
+			it.routes.erase(type)
+		else:
+			it.routes[type] = pins
 
 
 @rpc("authority", "call_remote", "reliable")

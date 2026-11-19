@@ -20,6 +20,7 @@ var pinned := false     # placed deliberately: stays exactly put (no physics) un
 var power_to := 0
 var net_to := 0
 var coolant_to := 0     # what this item's coolant hose is plugged into
+var routes: Dictionary = {}   # link type -> [Vector3]: where that cable is pinned on its way to the provider
 var worn := 0           # heat suit: peer id wearing it
 var opened := false     # machines: the lid is off, parts can go in and out
 var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation

@@ -16,6 +16,7 @@ extends Node
 ##   --shop                 open the parts market
 ##   --used                 open the parts market on its second-hand side
 ##   --bench                host: put two opened, fully fitted machines on the driveway
+##   --cables               host: cable up the garage, three machines loosely and one neatly pinned
 ##   --pitch=DEG            initial look up (+) or down (-) of the local player
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
@@ -113,6 +114,8 @@ func _handle_args() -> void:
 		world.hud.open_company(args["company"] if args["company"] != "" else "overview")
 	if args.has("bench") and world:
 		world.debug_bench()
+	if args.has("cables") and world:
+		world.debug_cables()
 	if args.has("pitch") and world:
 		world.player(multiplayer.get_unique_id()).head.rotation.x = deg_to_rad(float(args["pitch"]))
 	if args.has("shop") and world:
@@ -220,6 +223,22 @@ func _selftest() -> void:
 	world.request_link(kit["lamp"].id, "power", kit["outlet"].id)
 	await _wait(0.6)
 	_check("mower running, lamp plugged in")
+	#    cables: loose ones reach 7 m; pinned along the way they go much further and nobody trips
+	var lamp: Node3D = kit["lamp"]
+	var far: Vector3 = lamp.global_position + Vector3(12, 0, 0)
+	var along: Array = [lamp.global_position + Vector3(4, 0.02, 0), lamp.global_position + Vector3(8, 0.02, 0)]
+	print("CHECK 12 m of loose cable: '%s'; pinned twice: '%s'; 60 m pinned: '%s'" % [world.route_problem(lamp.global_position, [], far),
+		world.route_problem(lamp.global_position, along, far),
+		world.route_problem(lamp.global_position, [far, far + Vector3(0, 0, 6), far + Vector3(40, 0, 6)], far + Vector3(46, 0, 6))])
+	var plug_at: Vector3 = kit["outlet"].global_position
+	var mid: Vector3 = (lamp.global_position + plug_at) * 0.5 + Vector3(0, 0.02 - (lamp.global_position.y + plug_at.y) * 0.5, 0)
+	world.request_link(lamp.id, "power", 0)
+	world.request_link(lamp.id, "power", kit["outlet"].id, [mid + Vector3(-0.5, 0, 0.4), mid + Vector3(0.5, 0, 0.4)])
+	await _wait(0.6)
+	var clipped: Vector3 = mid + Vector3(0, 0, 0.4)
+	print("CHECK lamp cable re-run with 2 pins: pins=%d lit=%s, trips on the pinned stretch=%s, on the loose end=%s" % [
+		lamp.routes.get("power", []).size(), lamp.status == 3, not world.cables.tripped_by(clipped).is_empty(),
+		not world.cables.tripped_by((mid + Vector3(-0.5, 0, 0.4)).lerp(lamp.global_position, 0.15) * Vector3(1, 0, 1)).is_empty()])
 
 	# 4. real estate: insult neighbour 17 (next door, east), then pay well over the odds;
 	#    buy number 16 and knock it down

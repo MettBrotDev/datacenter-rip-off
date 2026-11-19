@@ -299,13 +299,28 @@ func _update_actions() -> void:
 		acts.append(["", "Pedalling: %d / %d W" % [bike.load, bike.def["gen"]["watts"]], Callable()])
 	elif not _cable.is_empty():
 		var type: String = _cable["type"]
+		var pins: Array = _cable["pins"]
+		var from: Vector3 = _world.items[_cable["id"]].global_position
 		if t and t.provides == type:
-			if _world.sockets_used(t.id, type) < t.sockets:
-				acts.append(["throw", "[Click] Plug into %s" % t.label.to_lower(), _plug.bind(t.id)])
-			else:
+			var why: String = _world.route_problem(from, pins, t.global_position)
+			if _world.sockets_used(t.id, type) >= t.sockets:
 				acts.append(["", "%s is full" % t.label, Callable()])
+			elif why != "":
+				acts.append(["", why, Callable()])
+			else:
+				acts.append(["throw", "[Click] Plug into %s" % t.label.to_lower(), _plug.bind(t.id)])
 		else:
-			acts.append(["", "Holding a %s. Find somewhere to plug it in." % WORDS[type], Callable()])
+			# Tidy or messy is up to you: click walls, floors and ceilings to clip the cable down
+			# along the way, or just drag it straight across the room.
+			var spot: Variant = _pin_spot()
+			var why: String = "" if spot == null else _world.route_problem(from, pins + [spot], spot)
+			if spot != null and why == "":
+				acts.append(["throw", "[Click] Pin the %s here" % WORDS[type], _pin.bind(spot)])
+			elif spot != null:
+				acts.append(["", why, Callable()])
+			acts.append(["", "Holding a %s. Plug it in somewhere, or pin it along the way to keep it tidy." % WORDS[type], Callable()])
+		if not pins.is_empty():
+			acts.append(["use", "[Q] Take the last pin up (%d)" % pins.size(), _unpin])
 		acts.append([type, "[%s] Let go" % KEYS[type], _set_cable.bind({})])
 	elif held:
 		if held.kind == "fuel" and t is RigidBody3D and t.def.get("gen", {}).get("kind", "") == "fuel":
@@ -356,7 +371,7 @@ func _update_actions() -> void:
 				acts.append([type, "[%s] Unplug %s%s" % [KEYS[type], WORDS[type], warning], _world.request_link.bind(t.id, type, 0)])
 			else:
 				acts.append([type, "[%s] Grab %s" % [KEYS[type], WORDS[type]],
-						_set_cable.bind({"id": t.id, "type": type})])
+						_set_cable.bind({"id": t.id, "type": type, "pins": []})])
 		if t.kind == "parcel":
 			acts.append(["use", "[Q] Unpack", _world.request_unpack.bind(t.id)])
 		if t.def.get("wear", false) and _world.worn_by(peer_id) == null:
@@ -556,5 +571,23 @@ func _set_cable(cable: Dictionary) -> void:
 
 
 func _plug(provider_id: int) -> void:
-	_world.request_link(_cable["id"], _cable["type"], provider_id)
+	_world.request_link(_cable["id"], _cable["type"], provider_id, _cable["pins"])
 	_set_cable({})
+
+
+## Where the crosshair rests on a wall, floor or ceiling within reach (a cable can be pinned there), or null.
+func _pin_spot() -> Variant:
+	if not _ray.is_colliding():
+		return null
+	var c := _ray.get_collider()
+	if not c is StaticBody3D or "provides" in c:
+		return null
+	return _ray.get_collision_point() + _ray.get_collision_normal() * 0.02
+
+
+func _pin(spot: Vector3) -> void:
+	_cable["pins"].append(spot)
+
+
+func _unpin() -> void:
+	_cable["pins"].pop_back()

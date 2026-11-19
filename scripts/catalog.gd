@@ -41,7 +41,9 @@ const Shapes = preload("res://scripts/shapes.gd")
 
 const START_MONEY := 1500.0
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
-const MAX_CABLE := 7.0           # metres before a cable gets yanked out
+const MAX_CABLE := 7.0           # metres a loose stretch of cable reaches before it gets yanked out
+const MAX_ROUTED := 40.0         # metres of cable in total when it is pinned along the way
+const MAX_PINS := 24
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
 const SHOP: Array[String] = ["server_ws", "server_4u", "server_pod",
 	"cpu_celery", "cpu_ryzer", "cpu_thread", "cpu_xenon", "cpu_epycc",
