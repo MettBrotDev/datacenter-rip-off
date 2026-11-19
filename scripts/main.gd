@@ -6,6 +6,8 @@ extends Node
 ##   --name=X               player name
 ##   --bot                  local player walks, grabs and throws on its own
 ##   --yaw=DEG              initial facing of the local player
+##   --pos=X,Y,Z            initial position of the local player
+##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
 ##   --shot=PATH            save a screenshot after ~2.5 s, then quit
@@ -66,11 +68,17 @@ func _handle_args() -> void:
 		Net.my_name = args["name"]
 		Net.my_color = Net.PALETTE[absi(hash(Net.my_name)) % Net.PALETTE.size()]
 	Net.bot = args.has("bot")
+	Net.test_mode = args.has("bot") or args.has("probe") or args.has("shot") or args.has("selftest")
+	if args.has("pos"):
+		var xyz: PackedStringArray = args["pos"].split(",")
+		Net.test_pos = Vector3(float(xyz[0]), float(xyz[1]), float(xyz[2]))
 	Net.test_yaw = float(args.get("yaw", "0"))
 	if args.has("host"):
 		Net.host()
 	elif args.has("join"):
 		Net.join(args["join"] if args["join"] != "" else "127.0.0.1")
+	if args.has("open") and world:
+		world.request_door()
 	if args.has("selftest"):
 		_selftest()
 	if args.has("probe"):

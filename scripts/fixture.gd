@@ -21,6 +21,10 @@ const KINDS := {
 		[Vector3(0.28, 0.2, 0.01), Vector3(0, 0.08, 0.092), Color(0.2, 0.21, 0.24), 0.0],
 		[Vector3(0.05, 0.1, 0.03), Vector3(0, 0.08, 0.105), Color(0.2, 1.0, 0.5), 3.0, "lamp"],
 	]},
+	"door": {"label": "Garage door button", "provides": "", "sockets": 0, "size": Vector3(0.14, 0.2, 0.06), "parts": [
+		[Vector3(0.14, 0.2, 0.05), Vector3(0, 0, 0.025), Color(0.85, 0.75, 0.15), 0.0],
+		[Vector3(0.07, 0.07, 0.02), Vector3(0, 0.03, 0.055), Color(0.2, 1.0, 0.5), 2.5],
+	]},
 	"shop": {"label": "Shop laptop", "provides": "", "sockets": 0, "size": Vector3(0.42, 0.3, 0.3), "parts": [
 		[Vector3(0.36, 0.02, 0.25), Vector3(0, 0.01, 0.02), Color(0.2, 0.21, 0.24), 0.0],
 		[Vector3(0.36, 0.24, 0.012), Vector3(0, 0.14, -0.105), Color(0.2, 0.21, 0.24), 0.0],

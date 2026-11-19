@@ -5,10 +5,13 @@ const Fixture = preload("res://scripts/fixture.gd")
 const W := 9.0
 const D := 7.0
 const H := 3.0
+const DOOR_Y := 1.25
 
 var fixtures: Dictionary = {}   # fixture id -> Fixture
 
 var _body: StaticBody3D
+var _door: StaticBody3D
+var _door_shape: CollisionShape3D
 var _env: Environment
 
 
@@ -29,16 +32,38 @@ func _ready() -> void:
 	_box(Vector3(W + 2, 1, D + 2), Vector3(0, -0.5, 0), concrete)
 	_box(Vector3(W + 2, 1, D + 2), Vector3(0, H + 0.5, 0), wood)
 	_box(Vector3(W + 2, H, 1), Vector3(0, H / 2, -D / 2 - 0.5), brick)
-	_box(Vector3(W + 2, H, 1), Vector3(0, H / 2, D / 2 + 0.5), brick)
+	_box(Vector3(3.8, H, 1), Vector3(-3.6, H / 2, D / 2 + 0.5), brick)    # front wall, left of the door
+	_box(Vector3(3.8, H, 1), Vector3(3.6, H / 2, D / 2 + 0.5), brick)     # right of the door
+	_box(Vector3(3.4, H - 2.5, 1), Vector3(0, 2.5 + (H - 2.5) / 2, D / 2 + 0.5), brick)   # above it
+	_box(Vector3(W + 2.6, 0.16, D + 2.6), Vector3(0, H + 1.08, 0), _mat(Color(0.16, 0.17, 0.2), 0.8), false)   # roof
 	_box(Vector3(1, H, D), Vector3(-W / 2 - 0.5, H / 2, 0), brick)
 	_box(Vector3(1, H, D), Vector3(W / 2 + 0.5, H / 2, 0), brick)
 	for x: float in [-3.0, -1.0, 1.0, 3.0]:
 		_box(Vector3(0.16, 0.22, D), Vector3(x, H - 0.11, 0), wood, false)
 
-	# roller door on the back wall
-	_box(Vector3(3.4, 2.5, 0.06), Vector3(0, 1.25, D / 2 - 0.03), door, false)
+	# roller door: its own body so it can slide up into the wall
+	_door = StaticBody3D.new()
+	_door.position = Vector3(0, DOOR_Y, D / 2 + 0.12)
+	add_child(_door)
+	var panel := BoxMesh.new()
+	panel.size = Vector3(3.4, 2.5, 0.08)
+	panel.material = door
+	var panel_node := MeshInstance3D.new()
+	panel_node.mesh = panel
+	_door.add_child(panel_node)
 	for i in 6:
-		_box(Vector3(3.4, 0.02, 0.07), Vector3(0, 0.4 + i * 0.4, D / 2 - 0.03), groove, false)
+		var line := BoxMesh.new()
+		line.size = Vector3(3.4, 0.02, 0.1)
+		line.material = groove
+		var line_node := MeshInstance3D.new()
+		line_node.mesh = line
+		line_node.position.y = -0.85 + i * 0.4
+		_door.add_child(line_node)
+	var door_box := BoxShape3D.new()
+	door_box.size = Vector3(3.4, 2.5, 0.2)
+	_door_shape = CollisionShape3D.new()
+	_door_shape.shape = door_box
+	_door.add_child(_door_shape)
 
 	# workbench along the left wall
 	_box(Vector3(0.75, 0.06, 2.4), Vector3(-W / 2 + 0.4, 0.9, -1.0), wood)
@@ -59,9 +84,17 @@ func _ready() -> void:
 	_fixture(-3, "router", Vector3(1.6, 1.5, -D / 2), 0)
 	_fixture(-4, "breaker", Vector3(-2.4, 1.45, -D / 2), 0)
 	_fixture(-5, "shop", Vector3(-W / 2 + 0.38, 0.93, -1.0), 90)
+	_fixture(-6, "door", Vector3(2.1, 1.2, D / 2), 180)        # door button, inside
+	_fixture(-7, "door", Vector3(2.1, 1.2, D / 2 + 1.0), 0)    # door button, outside
 
 	_lamp(Vector3(-2.2, H, 0.3), true)
 	_lamp(Vector3(2.2, H, 0.3), false)
+
+
+func set_door(open: bool) -> void:
+	_door_shape.set_deferred("disabled", open)
+	create_tween().tween_property(_door, "position:y", DOOR_Y + (2.42 if open else 0.0), 0.8) \
+			.set_trans(Tween.TRANS_SINE)
 
 
 func _fixture(id: int, kind: String, pos: Vector3, yaw: float) -> void:
@@ -76,11 +109,24 @@ func _fixture(id: int, kind: String, pos: Vector3, yaw: float) -> void:
 func _environment() -> void:
 	var env := Environment.new()
 	_env = env
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.02, 0.02, 0.03)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(1.0, 0.9, 0.8)
-	env.ambient_light_energy = 0.4
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.22, 0.46, 0.9)
+	sky_mat.sky_horizon_color = Color(0.72, 0.84, 0.96)
+	sky_mat.ground_horizon_color = Color(0.72, 0.84, 0.96)
+	sky_mat.ground_bottom_color = Color(0.25, 0.32, 0.22)
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.5
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-48, -35, 0)
+	sun.light_color = Color(1.0, 0.96, 0.88)
+	sun.light_energy = 1.3
+	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 80.0
+	add_child(sun)
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.glow_enabled = true
 	env.glow_intensity = 0.9

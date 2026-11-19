@@ -19,6 +19,8 @@ var my_name := "Player"
 var my_color := PALETTE[0]
 var in_session := false
 var bot := false               # test mode: local player moves on its own
+var test_mode := false         # any test flag given: never capture or read the real mouse
+var test_pos: Variant = null   # test mode: initial position of the local player (Vector3)
 var test_yaw := 0.0            # test mode: initial facing of the local player, degrees
 
 

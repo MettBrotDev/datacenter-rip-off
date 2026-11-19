@@ -26,6 +26,7 @@ var _settings: Node
 var _send_t := 0.0
 var _bot_t := 0.0
 var _last_pos := Vector3.ZERO
+var _spawn := Vector3.ZERO
 var _ghost: MeshInstance3D    # preview of where the held item would be placed
 var _place_xf: Variant = null # Transform3D of that spot, or null when there is none
 var _place_turns := 0         # extra quarter turns chosen with R
@@ -64,6 +65,9 @@ func _ready() -> void:
 
 	if is_local:
 		rotation.y = deg_to_rad(Net.test_yaw)
+		if Net.test_pos != null:
+			position = Net.test_pos
+		_spawn = position
 		_blob.visible = false
 		_cam = Camera3D.new()
 		_cam.near = 0.05
@@ -74,7 +78,8 @@ func _ready() -> void:
 		_ray.collision_mask = 7   # world + loose items + attached items
 		_ray.add_exception(self)
 		head.add_child(_ray)
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if not Net.test_mode:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		var ghost_mat := StandardMaterial3D.new()
 		ghost_mat.albedo_color = Color(0.3, 1.0, 0.6, 0.35)
 		ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -104,14 +109,21 @@ func aim_dir() -> Vector3:
 	return -head.global_basis.z
 
 
+## True while the player controls the character (no menu open). Test runs never capture the mouse.
+func _active() -> bool:
+	return Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or Net.test_mode
+
+
 func _apply_settings() -> void:
 	_cam.fov = _settings.fov if _settings else 70.0
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	if not is_local or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+	if not is_local or not _active():
 		return
 	if e is InputEventMouseMotion:
+		if Net.test_mode:
+			return   # automated runs must not react to whoever is using the PC
 		var sens: float = SENS * (_settings.mouse_sens if _settings else 1.0)
 		var flip := -1.0 if _settings and _settings.invert_y else 1.0
 		rotation.y -= e.relative.x * sens
@@ -145,8 +157,11 @@ func _process(dt: float) -> void:
 
 
 func _move(dt: float) -> void:
-	var active := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var active := _active() and not Net.test_mode
 	var dir := Vector3.ZERO
+	if position.y < -20.0:   # fell out of the world
+		position = _spawn
+		velocity = Vector3.ZERO
 	var speed := WALK
 	if Net.bot:
 		_bot(dt)
@@ -237,6 +252,9 @@ func _update_actions() -> void:
 		match t.kind:
 			"shop":
 				acts.append(["interact", "[E] Open the parts market", _world.hud.open_shop])
+			"door":
+				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
+						_world.request_door])
 			"breaker":
 				if _world.tripped:
 					acts.append(["interact", "[E] Reset the breaker", _world.request_breaker])

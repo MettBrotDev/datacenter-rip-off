@@ -17,6 +17,7 @@ const UI = preload("res://scripts/ui.gd")
 const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3(1.5, 0, 2), Vector3(0, 0, 1)]
 const DELIVERY := Vector3(2.6, 1.0, 1.8)   # next to the roller door
 const SIM_STEP := 0.5
+const OUTSIDE := "res://scripts/outside.gd"   # scenery around the garage
 
 var items: Dictionary = {}      # item id (> 0) -> Item
 var fixtures: Dictionary = {}   # fixture id (< 0) -> Fixture
@@ -27,7 +28,9 @@ var money := 0.0
 var tokens := 0.0
 var watts := 0.0
 var tripped := false
+var door_open := false
 
+var _garage: Garage
 var _players: Node3D
 var _items: Node3D
 var _sim: Sim                   # host only
@@ -37,9 +40,11 @@ var _sim_t := 0.0
 
 
 func _ready() -> void:
-	var garage := Garage.new()
-	add_child(garage)
-	fixtures = garage.fixtures
+	_garage = Garage.new()
+	add_child(_garage)
+	fixtures = _garage.fixtures
+	if ResourceLoader.exists(OUTSIDE):
+		add_child(load(OUTSIDE).new())
 	_players = Node3D.new()
 	_players.name = "Players"
 	add_child(_players)
@@ -137,6 +142,10 @@ func request_breaker() -> void:
 	_to_host(&"_h_breaker", [])
 
 
+func request_door() -> void:
+	_to_host(&"_h_door", [])
+
+
 # --- players ----------------------------------------------------------------
 
 func _reconcile_players() -> void:
@@ -196,6 +205,7 @@ func _h_snapshot() -> void:
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
 				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
+	_r_door.rpc_id(peer, door_open)
 	ready_peers.append(peer)
 	_sim_step(0.0)
 
@@ -302,6 +312,12 @@ func _h_breaker() -> void:
 	_sim.reset_breaker()
 	_cast(&"_r_toast", ["%s reset the breaker" % _name(Net.sender())])
 	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_door() -> void:
+	if multiplayer.is_server():
+		_cast(&"_r_door", [not door_open])
 
 
 # --- host: ticking -------------------------------------------------------------
@@ -445,6 +461,12 @@ func _r_sim(p_money: float, p_tokens: float, p_watts: float, p_tripped: bool, st
 	for f: Node3D in fixtures.values():
 		f.set_tripped(tripped)
 	hud.set_stats(money, tokens, watts, tripped)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_door(open: bool) -> void:
+	door_open = open
+	_garage.set_door(open)
 
 
 @rpc("authority", "call_remote", "reliable")
