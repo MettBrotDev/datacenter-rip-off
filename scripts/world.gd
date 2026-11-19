@@ -1504,6 +1504,7 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.global_transform = xf
 	it._pin_xf = xf
 	items[id] = it
+	Sound.spawned(it)
 	if multiplayer.is_server():
 		it.sleeping_state_changed.connect(_on_item_sleep.bind(it))
 
@@ -1511,6 +1512,7 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 ## A puddle on the floor: wet electronics standing in it are ruined within a couple of seconds.
 @rpc("authority", "call_remote", "reliable")
 func _r_puddle(pos: Vector3, radius: float, seconds: float) -> void:
+	Sound.puddle(pos, radius)
 	puddles.append({"pos": pos, "radius": radius, "left": seconds})
 	var disc := CylinderMesh.new()
 	disc.top_radius = radius
@@ -1547,6 +1549,7 @@ func _r_wear(id: int, peer: int) -> void:
 func _r_hold(id: int, peer: int) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.hold(it)
 		it.parent = 0
 		it.pinned = false
 		it.holder = peer
@@ -1557,6 +1560,7 @@ func _r_hold(id: int, peer: int) -> void:
 func _r_release(id: int, xf: Transform3D, vel: Vector3) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.released(it, vel)
 		it.release(xf, vel)
 
 
@@ -1565,6 +1569,7 @@ func _r_release(id: int, xf: Transform3D, vel: Vector3) -> void:
 func _r_place(id: int, xf: Transform3D) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.placed(it)
 		it.release(xf, Vector3.ZERO, true)
 
 
@@ -1572,6 +1577,7 @@ func _r_place(id: int, xf: Transform3D) -> void:
 func _r_lid(id: int, open: bool) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.lid(it, open)
 		it.set_open(open)
 
 
@@ -1579,6 +1585,7 @@ func _r_lid(id: int, open: bool) -> void:
 func _r_attach(id: int, parent_id: int, slot: int) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.attached(it, items.get(parent_id))
 		it.holder = 0
 		it.parent = parent_id
 		it.slot = slot
@@ -1589,6 +1596,7 @@ func _r_attach(id: int, parent_id: int, slot: int) -> void:
 func _r_link(id: int, type: String, provider_id: int, pins: Array, paid: float) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.link(it, type, provider_id)
 		it.set_link(type, provider_id)
 		it.loose_end.erase(type)
 		if pins.is_empty():
@@ -1606,6 +1614,7 @@ func _r_link(id: int, type: String, provider_id: int, pins: Array, paid: float) 
 func _r_dangle(id: int, type: String, pins: Array, end: Vector3, paid: float) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.dangle(it, type, end)
 		it.set_link(type, 0)
 		it.loose_end[type] = end
 		it.cable_m[type] = paid
@@ -1650,6 +1659,7 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 			f.set_lamp(1 if tripped_circuits.has(f.circuit) else 2)
 	hud.set_stats(money, tokens, watts, capacity, company[4], tripped)
 	board.refresh(self)
+	Sound.sim(self)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1668,6 +1678,7 @@ func _r_used(state: Dictionary) -> void:
 ## A message for one player only (why something they asked for was refused).
 @rpc("authority", "call_remote", "reliable")
 func _r_notice(text: String) -> void:
+	Sound.refused()
 	hud.toast(text)
 
 
@@ -1675,6 +1686,7 @@ func _r_notice(text: String) -> void:
 func _r_despawn(id: int) -> void:
 	var it: Item = items.get(id)
 	if it:
+		Sound.despawned(it)
 		items.erase(id)
 		it.queue_free()
 
@@ -1683,6 +1695,7 @@ func _r_despawn(id: int) -> void:
 func _r_house(house_id: int, state: int) -> void:
 	var h: House = houses[house_id]
 	var before := h.fixtures.keys()
+	Sound.house(h, state)
 	h.set_state(state)
 	for id: int in before:   # the neighbour, and after a demolition the door, are gone
 		if not h.fixtures.has(id):
@@ -1691,17 +1704,20 @@ func _r_house(house_id: int, state: int) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _r_house_door(house_id: int, open: bool) -> void:
+	Sound.house_door(houses[house_id], open)
 	houses[house_id].set_door(open)
 
 
 @rpc("authority", "call_remote", "reliable")
 func _r_offer_reply(house_id: int, text: String, accepted: bool) -> void:
+	Sound.offer_reply(accepted)
 	hud.offer_reply(house_id, text, accepted)
 
 
 @rpc("authority", "call_remote", "reliable")
 func _r_door(open: bool) -> void:
 	door_open = open
+	Sound.door(open)
 	_garage.set_door(open)
 
 

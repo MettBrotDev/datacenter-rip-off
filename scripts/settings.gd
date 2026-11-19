@@ -10,6 +10,10 @@ var mouse_sens: float = 1.0
 var invert_y: bool = false
 var fov: float = 70.0
 var master_volume: float = 0.8
+var sfx_volume: float = 0.8       # world sounds and ambience (applied to their buses by the Sound autoload)
+var ui_volume: float = 0.8
+var music_volume: float = 0.6
+var music_in_game: bool = false   # the menu music is always on; in game it is off unless asked for
 var window_mode: int = 0
 var vsync: bool = true
 var max_fps: int = 0
@@ -19,7 +23,7 @@ var glow: bool = true
 var ssao: bool = true
 
 const KEYS: Array[String] = [
-	"mouse_sens", "invert_y", "fov", "master_volume", "window_mode", "vsync",
+	"mouse_sens", "invert_y", "fov", "master_volume", "sfx_volume", "ui_volume", "music_volume", "music_in_game", "window_mode", "vsync",
 	"max_fps", "render_scale", "msaa", "glow", "ssao",
 ]
 
@@ -45,6 +49,10 @@ func reset() -> void:
 	invert_y = false
 	fov = 70.0
 	master_volume = 0.8
+	sfx_volume = 0.8
+	ui_volume = 0.8
+	music_volume = 0.6
+	music_in_game = false
 	window_mode = 0
 	vsync = true
 	max_fps = 0
@@ -60,7 +68,7 @@ func reset() -> void:
 ## True when the game was started with any of the test flags (see main.gd).
 func _is_test_run() -> bool:
 	for arg: String in OS.get_cmdline_user_args():
-		for flag: String in ["--bot", "--probe", "--shot", "--selftest"]:
+		for flag: String in ["--bot", "--probe", "--shot", "--selftest", "--soundcheck"]:
 			if arg.begins_with(flag):
 				return true
 	return false
@@ -106,6 +114,9 @@ func _clamp_all() -> void:
 	mouse_sens = clampf(float(mouse_sens), 0.1, 3.0)
 	fov = clampf(float(fov), 60.0, 110.0)
 	master_volume = clampf(float(master_volume), 0.0, 1.0)
+	sfx_volume = clampf(float(sfx_volume), 0.0, 1.0)
+	ui_volume = clampf(float(ui_volume), 0.0, 1.0)
+	music_volume = clampf(float(music_volume), 0.0, 1.0)
 	window_mode = clampi(int(window_mode), 0, 2)
 	max_fps = maxi(int(max_fps), 0)
 	render_scale = clampf(float(render_scale), 0.5, 1.0)

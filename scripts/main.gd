@@ -26,6 +26,9 @@ extends Node
 ##   --pose=N               host: character showcase, set 1..4 of dummies frozen in one situation each
 ##                          (--pose_t=SECONDS: freeze the animation at that moment, --pose_yaw=DEG: their facing,
 ##                          --pose_pick=0,2: only those entries of the set)
+##   --soundcheck[=DIR]     build the whole synthesised sound bank, print one SOUND line of numbers per sound (and a
+##                          SOUNDBANK summary), with DIR also write every sound there as a WAV file, then quit (headless is fine)
+##   --settings             open the settings menu on the main menu (to look at it; combine with --shot)
 ##   --probe=SECONDS        print world state after N seconds, then quit
 ##   --shot=PATH            save a screenshot after --wait=SECONDS (default 2.5), then quit
 
@@ -87,6 +90,14 @@ func _handle_args() -> void:
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
 		args[kv[0]] = kv[1] if kv.size() > 1 else ""
+	if args.has("soundcheck"):
+		Sound.soundcheck(args["soundcheck"])
+		get_tree().quit()
+		return
+	if args.has("settings"):
+		for c: Node in menu.get_children():
+			if c.get_script() != null and (c.get_script() as Script).resource_path.ends_with("settings_menu.gd"):
+				(c as Control).show()
 	if args.has("name"):
 		Net.my_name = args["name"]
 		Net.my_color = Net.PALETTE[absi(hash(Net.my_name)) % Net.PALETTE.size()]

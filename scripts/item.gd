@@ -194,6 +194,7 @@ func _show_worn() -> void:
 func set_status(bits: int) -> void:
 	if bits == status:
 		return
+	Sound.status(self, bits)
 	status = bits
 	if bits & 4 and not broken:
 		_ruin()

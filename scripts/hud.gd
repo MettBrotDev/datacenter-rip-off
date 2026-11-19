@@ -187,6 +187,7 @@ func set_weather(index: int) -> void:
 
 
 func toast(text: String) -> void:
+	Sound.toast(text)
 	var p := UI.hud_panel(10)
 	p.size_flags_horizontal = Control.SIZE_SHRINK_END
 	p.add_child(UI.label(text, 16))
@@ -277,11 +278,14 @@ func _unhandled_input(e: InputEvent) -> void:
 			_close_overlays()
 		else:
 			_pause.show()
+			Sound.ui("ui_open")
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		get_viewport().set_input_as_handled()
 
 
 func _close_overlays() -> void:
+	if _pause.visible:
+		Sound.ui("ui_close")
 	_shop.hide()
 	_offer.hide()
 	_pause.hide()

@@ -65,6 +65,10 @@ func _ready() -> void:
 	_check(rows, "ssao", "Ambient occlusion (SSAO)")
 	_header(rows, "AUDIO")
 	_slider(rows, "master_volume", "Master volume", 0.0, 1.0, 0.01, func(v: float) -> String: return "%d%%" % roundi(v * 100.0))
+	_slider(rows, "sfx_volume", "Effects volume", 0.0, 1.0, 0.01, func(v: float) -> String: return "%d%%" % roundi(v * 100.0))
+	_slider(rows, "ui_volume", "Interface volume", 0.0, 1.0, 0.01, func(v: float) -> String: return "%d%%" % roundi(v * 100.0))
+	_slider(rows, "music_volume", "Music volume", 0.0, 1.0, 0.01, func(v: float) -> String: return "%d%%" % roundi(v * 100.0))
+	_check(rows, "music_in_game", "Music while playing")
 
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 12)
