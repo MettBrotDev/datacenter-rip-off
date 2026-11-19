@@ -98,6 +98,11 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   protection is broken (`Item.sketchy`). It ruins items after 6 s, spreads to flammable neighbours,
   and is put out with an extinguisher or by rain.
 - Sprinting across a cable or hose pulls it out. Used parts may be dead on arrival.
+- Second-hand market (`used_market.gd`, host rules; `world.used` for clients; a tab of the parts market): about nine
+  random, time-limited offers at 30-70% of the new price, each with a hidden condition applied on unpacking
+  (fine, dead, sketchy, soaked, brick, swapped, bonus); 30% are complete rigs (machine + CPU + RAM + GPUs under
+  the lid; conditions `gutted` = dearest part missing, `dud` = one part dead). The pick-up pallet (`pickup.gd`)
+  beside the driveway sells whatever is on it.
 - The dumpster beside the driveway (`dumpster.gd`) deletes whatever is inside when its button is pressed.
 - Purchases arrive outside on the driveway as `parcel` items (`Item.contains` = what is inside) and are
   unpacked with Q. Parcels are rainproof.

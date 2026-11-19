@@ -788,8 +788,9 @@ func _h_buy_used(listing: int, staple: String) -> void:
 		return
 	var l := _market.take(listing)
 	_sim.money -= l["price"]
-	_parcel_cond[_deliver(l["kind"])] = {"cond": l["cond"], "actual": l["actual"]}
-	_cast(&"_r_toast", ["%s bought %s from %s (-%s)" % [who, Catalog.ITEMS[l["kind"]]["label"].to_lower(), l["seller"], UI.money(l["price"])]])
+	_parcel_cond[_deliver(l["kind"])] = {"cond": l["cond"], "actual": l["actual"], "parts": l["inside"]}
+	_cast(&"_r_toast", ["%s bought %s%s from %s (-%s)" % [who, "a complete rig: " if not l["parts"].is_empty() else "",
+		Catalog.ITEMS[l["kind"]]["label"].to_lower(), l["seller"], UI.money(l["price"])]])
 	_sim_step(0.0)
 
 
@@ -900,6 +901,14 @@ func _h_unpack(id: int) -> void:
 						_cast(&"_r_spawn", [_next_id, kind, thing.global_transform, [0, thing.id, slot, 0, 0, false, "", 0, 0, false]])
 						_next_id += 1
 				_cast(&"_r_toast", ["The %s came with a few things still inside it. Lucky you." % advertised])
+		# a rig: whatever really is in it, under the screwed-on lid. Missing or dead parts say nothing.
+		for part: Array in fate.get("parts", []):
+			var slot := free_slot(thing, Catalog.ITEMS[part[0]]["group"])
+			if slot < 0:
+				continue
+			_cast(&"_r_spawn", [_next_id, part[0], thing.global_transform, [0, thing.id, slot, 0, 0, false, "", 0, 0, false]])
+			items[_next_id].dead = part[1]
+			_next_id += 1
 	_sim_step(0.0)
 
 

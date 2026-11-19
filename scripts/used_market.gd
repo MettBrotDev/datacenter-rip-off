@@ -15,16 +15,18 @@ const HAGGLE_OFF := 0.8                # price multiplier when the seller gives 
 # Most expensive item (new price) that is "near what the crew can use", by funding level.
 const CAP := [450.0, 1600.0, 4500.0, 13000.0, 30000.0, 60000.0, 100000.0]
 const TEMPT := 0.14                    # share of offers that ignore the cap
+const RIGS := 0.3                      # share of offers that are a whole machine with parts in it
+const RIG_PRICE := 0.85                # a rig is cheaper than its parts bought one by one, second-hand
 const SKIP := ["crate", "fuel", "screwdriver", "bucket", "extinguisher", "suit", "lamp", "outlet"]
 
 ## Seller grade: price share of the new price, and odds of each hidden condition (weights).
 const GRADES := [
 	{"name": "shady", "price": Vector2(0.30, 0.44), "haggle": 0.7,
-		"odds": {"fine": 25, "dead": 25, "sketchy": 12, "soaked": 12, "brick": 10, "swapped": 10, "bonus": 6}},
+		"odds": {"fine": 25, "dead": 25, "sketchy": 12, "soaked": 12, "brick": 10, "swapped": 10, "bonus": 6, "gutted": 22, "dud": 20}},
 	{"name": "plain", "price": Vector2(0.44, 0.57), "haggle": 0.55,
-		"odds": {"fine": 55, "dead": 12, "sketchy": 6, "soaked": 8, "brick": 4, "swapped": 7, "bonus": 8}},
+		"odds": {"fine": 55, "dead": 12, "sketchy": 6, "soaked": 8, "brick": 4, "swapped": 7, "bonus": 8, "gutted": 9, "dud": 12}},
 	{"name": "nice", "price": Vector2(0.57, 0.70), "haggle": 0.4,
-		"odds": {"fine": 75, "dead": 6, "sketchy": 3, "soaked": 4, "brick": 2, "swapped": 4, "bonus": 6}},
+		"odds": {"fine": 75, "dead": 6, "sketchy": 3, "soaked": 4, "brick": 2, "swapped": 4, "bonus": 6, "gutted": 4, "dud": 6}},
 ]
 
 const SELLERS := ["xX_GpuGuy_Xx", "Dave (not that Dave)", "My Ex's Garage", "Definitely Legit Ltd", "Brenda from IT",
@@ -48,6 +50,9 @@ const HINT := {
 	"soaked": ["Rescued from a flood. The photos are blurry on purpose.", "Slightly moist. Dries in no time.", "Found it in the garden."],
 	"brick": ["Sealed box, as seen.", "Heavy. Very heavy. Trust me.", "Photo is a stock photo of the real thing."],
 	"swapped": ["Similar to the picture.", "Original box lost, so I used another box.", "Close enough."],
+	"gutted": ["Lighter than you would expect.", "Complete, in spirit.", "I kept one small thing as a souvenir.",
+		"Everything is in there, surely."],
+	"dud": ["Mostly works.", "Tested 90% of it.", "One of the parts made a noise once. Just once.", "Ran fine until the thunderstorm."],
 	"bonus": ["Contents may include extras, I was too lazy to check.", "Comes with some bits I could not get out.",
 		"Do not open the lid without a plan."],
 }
@@ -59,7 +64,9 @@ const SCRAP := 0.03
 # Things that have no catalog price: what a courier gives for them, and for the scrap.
 const FURNITURE := {"sofa": 40, "tv": 30, "table": 10, "bed": 50, "fridge": 35, "plant": 3}
 
-var listings: Array = []    # host: {id, kind, seller, text, price, was, left, haggled, cond, actual, grade}
+## host: {id, kind, seller, text, price, was, left, haggled, cond, actual, grade, new,
+##   parts: [kind] the advert promises inside (a rig; [] for a single item), inside: [[kind, dead]] what is really in there}
+var listings: Array = []
 var test_force := ""        # test hook: every new random listing gets this condition (when it applies)
 
 var _next := 1
@@ -84,7 +91,7 @@ func state() -> Dictionary:
 	var out := []
 	for l: Dictionary in listings:
 		out.append({"id": l["id"], "kind": l["kind"], "seller": l["seller"], "text": l["text"], "price": l["price"],
-			"was": l["was"], "left": l["left"], "haggled": l["haggled"]})
+			"was": l["was"], "left": l["left"], "haggled": l["haggled"], "parts": l["parts"], "new": l["new"]})
 	return {"staples": STAPLES, "seller": STAPLE_SELLER, "listings": out}
 
 
@@ -161,8 +168,9 @@ func haggle(id: int) -> Dictionary:
 
 
 ## Test hook: adds a listing with a chosen hidden condition. `actual` = the kind that is really in the box.
-func test_listing(kind: String, cond: String, actual := "") -> int:
-	var l := _make(START_LIFETIME, kind, cond)
+## With `parts` it is a rig: that machine with those parts in it.
+func test_listing(kind: String, cond: String, actual := "", parts: Array = []) -> int:
+	var l := _make(START_LIFETIME, kind, cond, parts)
 	if actual != "":
 		l["actual"] = actual
 	listings.append(l)
@@ -193,17 +201,40 @@ func _pool() -> Array:
 	return near if not near.is_empty() else far
 
 
-func _make(life: Vector2, kind := "", cond := "") -> Dictionary:
+func _make(life: Vector2, kind := "", cond := "", parts: Array = []) -> Dictionary:
+	if kind == "" and randf() < RIGS:
+		var rig := _rig()
+		if not rig.is_empty():
+			kind = rig[0]
+			parts = rig[1]
 	if kind == "":
 		var pool := _pool()
 		kind = pool[randi() % pool.size()]
 	var def: Dictionary = Catalog.ITEMS[kind]
+	var is_rig := not parts.is_empty()
 	var roll := randf()
 	var grade := 0 if roll < 0.3 else (1 if roll < 0.75 else 2)
 	if cond == "":
-		cond = test_force if test_force != "" and _applies(test_force, kind) else _roll_cond(kind, grade)
+		cond = test_force if test_force != "" and _applies(test_force, kind, is_rig) else _roll_cond(kind, grade, is_rig)
 	var share := randf_range(GRADES[grade]["price"].x, GRADES[grade]["price"].y)
-	var price := float(def["price"]) * share
+	var new_price := float(def["price"])
+	for part: String in parts:
+		new_price += float(Catalog.ITEMS[part]["price"])
+	var price := new_price * share * (RIG_PRICE if is_rig else 1.0)
+	# what is really inside: the advert minus whatever the seller forgot to mention
+	var inside: Array = []
+	for part: String in parts:
+		inside.append([part, false])
+	if cond == "gutted" and not inside.is_empty():   # the most expensive part stayed with the seller
+		var best := 0
+		for i in inside.size():
+			if Catalog.ITEMS[inside[i][0]]["price"] > Catalog.ITEMS[inside[best][0]]["price"]:
+				best = i
+		inside.remove_at(best)
+	elif cond == "dud" and not inside.is_empty():
+		inside[randi() % inside.size()][1] = true
+	elif cond == "brick":
+		inside = []
 	price = round(price / 5.0) * 5.0 if price >= 100.0 else round(price)
 	var hint_cond: String = cond if randf() < 0.65 else "fine"
 	var tone: Array = TONE[grade]
@@ -216,13 +247,88 @@ func _make(life: Vector2, kind := "", cond := "") -> Dictionary:
 		actual = _cheaper(kind)
 	var l := {"id": _next, "kind": kind, "seller": SELLERS[randi() % SELLERS.size()], "text": text,
 		"price": maxi(1, int(price)), "was": 0, "left": randf_range(life.x, life.y), "haggled": false,
-		"cond": cond, "actual": actual, "grade": grade}
+		"cond": cond, "actual": actual, "grade": grade, "parts": parts, "inside": inside, "new": int(new_price)}
 	_next += 1
 	return l
 
 
-func _applies(cond: String, kind: String) -> bool:
+## A machine and a sensible set of parts for it, as [chassis kind, [part kinds]], or [] if nothing fits the budget.
+## Sellers build what boots: a CPU that suits the cards, enough RAM for them, no more watts than the supply has.
+func _rig() -> Array:
+	var cap: float = CAP[clampi(_level, 0, CAP.size() - 1)] * 2.5
+	var have := {}
+	for l: Dictionary in listings:
+		if not l["parts"].is_empty():
+			have[l["kind"]] = true
+	var machines: Array = []
+	for kind: String in Catalog.ITEMS:
+		var d: Dictionary = Catalog.ITEMS[kind]
+		if d.has("psu") and d.has("slots") and d["price"] <= cap and not have.has(kind):
+			machines.append(kind)
+	if machines.is_empty():
+		return []
+	var chassis: String = machines[randi() % machines.size()]
+	var def: Dictionary = Catalog.ITEMS[chassis]
+	var room := {"cpu": 0, "ram": 0, "gpu": 0}
+	for slot: Dictionary in def["slots"]:
+		if room.has(slot["accepts"]):
+			room[slot["accepts"]] += 1
+	var cpus: Array = []
+	var gpus: Array = []
+	var rams: Array = []
+	for kind: String in Catalog.ITEMS:
+		var d: Dictionary = Catalog.ITEMS[kind]
+		match d.get("group", ""):
+			"cpu":
+				if d["tier"] <= def["max_tier"]:
+					cpus.append(kind)
+			"gpu":
+				if d["tier"] <= def["max_tier"] and (not d.get("liquid", false) or def.get("coolant_port", false)):
+					gpus.append(kind)
+			"ram":
+				rams.append(kind)
+	if cpus.is_empty() or rams.is_empty() or room["cpu"] == 0 or room["ram"] == 0:
+		return []
+	var parts: Array = []
+	var watts: float = def.get("watts", 0.0)
+	var gpu: String = gpus[randi() % gpus.size()] if not gpus.is_empty() and room["gpu"] > 0 else ""
+	var cards := 0
+	if gpu != "":
+		cards = randi_range(1, room["gpu"])
+		while cards > 0 and watts + cards * float(Catalog.ITEMS[gpu]["watts"]) > float(def["psu"]) * 0.85:
+			cards -= 1
+	# a CPU within one tier of the cards, so it does not hold them back
+	var want: int = Catalog.ITEMS[gpu]["tier"] - 1 if cards > 0 else 1
+	cpus.sort_custom(func(a: String, b: String) -> bool: return Catalog.ITEMS[a]["tier"] < Catalog.ITEMS[b]["tier"])
+	var cpu: String = cpus[-1]
+	for kind: String in cpus:
+		if Catalog.ITEMS[kind]["tier"] >= want:
+			cpu = kind
+			break
+	parts.append(cpu)
+	# the smallest sticks that cover what the cards need
+	var need: int = cards * int(Catalog.ITEMS[gpu]["needs_ram"]) if cards > 0 else 8
+	rams.sort_custom(func(a: String, b: String) -> bool: return Catalog.ITEMS[a]["gb"] < Catalog.ITEMS[b]["gb"])
+	var stick: String = rams[-1]
+	for kind: String in rams:
+		if int(Catalog.ITEMS[kind]["gb"]) * room["ram"] >= need:
+			stick = kind
+			break
+	for i in clampi(ceili(float(need) / Catalog.ITEMS[stick]["gb"]), 1, room["ram"]):
+		parts.append(stick)
+	for i in cards:
+		parts.append(gpu)
+	return [chassis, parts]
+
+
+func _applies(cond: String, kind: String, is_rig := false) -> bool:
 	var def: Dictionary = Catalog.ITEMS[kind]
+	match cond:
+		"gutted", "dud":
+			return is_rig
+		"swapped", "bonus":
+			if is_rig:
+				return false
 	match cond:
 		"dead", "soaked":
 			return def.get("fragile", false) or def.has("psu")
@@ -233,15 +339,15 @@ func _applies(cond: String, kind: String) -> bool:
 	return true
 
 
-func _roll_cond(kind: String, grade: int) -> String:
+func _roll_cond(kind: String, grade: int, is_rig := false) -> String:
 	var odds: Dictionary = GRADES[grade]["odds"]
 	var total := 0.0
 	for cond: String in odds:
-		if _applies(cond, kind):
+		if _applies(cond, kind, is_rig):
 			total += odds[cond]
 	var pick := randf() * total
 	for cond: String in odds:
-		if not _applies(cond, kind):
+		if not _applies(cond, kind, is_rig):
 			continue
 		pick -= odds[cond]
 		if pick <= 0.0:

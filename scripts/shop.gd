@@ -376,6 +376,18 @@ func _used_grid() -> GridContainer:
 	return grid
 
 
+## "Ryzer 5, 2x 16 GB stick, 2x RTX 4070" for the parts a rig is advertised with.
+func _parts_line(parts: Array) -> String:
+	var counts := {}
+	for part: String in parts:
+		counts[part] = counts.get(part, 0) + 1
+	var bits: Array[String] = []
+	for part: String in counts:
+		var label: String = str(Catalog.ITEMS[part]["label"]).replace(" (used)", "")
+		bits.append(label if counts[part] == 1 else "%dx %s" % [counts[part], label])
+	return ", ".join(bits)
+
+
 ## What is behind a card key: {"kind", "price", "was", "seller", "text", "left" (-1 = always)} or {}.
 func _used_entry(key: String) -> Dictionary:
 	var kind := key.substr(2)
@@ -404,10 +416,11 @@ func _used_card(key: String, kind: String) -> PanelContainer:
 	top.add_theme_constant_override("separation", 10)
 	v.add_child(top)
 	top.add_child(UI.chip(cat["icon"], COLORS[cat["color"]], 34))
-	var name_label := UI.wrap(UI.bold(def["label"], 15))
+	var rig: bool = not entry.get("parts", []).is_empty()
+	var name_label := UI.wrap(UI.bold(("Complete rig: %s" % def["label"]) if rig else def["label"], 15))
 	name_label.size_flags_horizontal = SIZE_EXPAND_FILL
 	top.add_child(name_label)
-	var seller := UI.caption(entry.get("seller", ""))
+	var seller := UI.caption(("%s   ·   %s" % [entry.get("seller", ""), _parts_line(entry["parts"])]) if rig else entry.get("seller", ""))
 	seller.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	v.add_child(seller)
 	var text := UI.wrap(UI.caption(entry.get("text", "")))
@@ -434,7 +447,7 @@ func _update_used_card(key: String) -> void:
 		return
 	var kind: String = entry["kind"]
 	var card: Dictionary = _used_cards[key]
-	card["price"].text = UI.money(entry["price"]) if entry.get("staple", false) else "%s   new %s" % [UI.money(entry["price"]), UI.money(Catalog.ITEMS[kind]["price"])]
+	card["price"].text = UI.money(entry["price"]) if entry.get("staple", false) else "%s   new %s" % [UI.money(entry["price"]), UI.money(entry.get("new", Catalog.ITEMS[kind]["price"]))]
 	card["price"].add_theme_color_override("font_color", UI.GREEN if entry["price"] <= _money else UI.RED)
 	card["left"].text = "" if entry["left"] < 0.0 else UI.mmss(entry["left"])
 
@@ -489,6 +502,8 @@ func _select_used(key: String) -> void:
 	seller.add_child(UI.bold(entry["seller"], 15))
 	if not staple:
 		_used_detail.add_child(UI.wrap(UI.label("\"%s\"" % entry["text"], 15, UI.AMBER)))
+	if not entry.get("parts", []).is_empty():
+		_used_detail.add_child(UI.wrap(UI.label("Comes with, says the seller: %s. Arrives with the lid screwed on." % _parts_line(entry["parts"]), 15, UI.TEXT)))
 	var spacer := Control.new()
 	spacer.size_flags_vertical = SIZE_EXPAND_FILL
 	_used_detail.add_child(spacer)
@@ -498,7 +513,7 @@ func _select_used(key: String) -> void:
 	var price_key := UI.label("Asking price", 15, UI.DIM)
 	price_key.size_flags_horizontal = SIZE_EXPAND_FILL
 	price_row.add_child(price_key)
-	var new_price: float = Catalog.ITEMS[kind]["price"]
+	var new_price: float = entry.get("new", Catalog.ITEMS[kind]["price"])
 	price_row.add_child(UI.big(UI.money(entry["price"]), UI.GREEN, 26))
 	var off := int(round((1.0 - entry["price"] / new_price) * 100.0))
 	_used_detail.add_child(UI.caption("Catalog price, new or not." if staple else "New it costs %s, so this is %d%% off." % [UI.money(new_price), off]))

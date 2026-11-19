@@ -583,8 +583,11 @@ func _selftest() -> void:
 	var market = world._market
 	print("CHECK used market: %d offers, staples %s" % [market.listings.size(), str(UsedMarket.STAPLES)])
 	for spec: Array in [["fine", "server_ws", ""], ["dead", "gpu_4070", ""], ["sketchy", "server_ws", ""], ["brick", "gpu_4090", ""],
-			["swapped", "gpu_4090", "gpu_1080"], ["bonus", "server_ws", ""], ["soaked", "gpu_4070", ""]]:
-		var listing: int = market.test_listing(spec[1], spec[0], spec[2])
+			["swapped", "gpu_4090", "gpu_1080"], ["bonus", "server_ws", ""], ["soaked", "gpu_4070", ""],
+			["fine", "server_ws", "", ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070"]],
+			["gutted", "server_ws", "", ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070"]],
+			["dud", "server_ws", "", ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070"]]]:
+		var listing: int = market.test_listing(spec[1], spec[0], spec[2], spec[3] if spec.size() > 3 else [])
 		var asked: float = market.find(listing)["price"]
 		var cash_before: float = world._sim.money
 		var parcels_before := _count("parcel")
@@ -603,11 +606,13 @@ func _selftest() -> void:
 		if spec[0] == "soaked":
 			await _run(4.0)
 		var got: Node3D = world.items[first]
+		var duds := 0
 		var mounted := 0
 		for it: Node3D in world.items.values():
 			mounted += 1 if it.parent == got.id else 0
-		print("CHECK used %s unpacked: it is a %s, ruined=%s sketchy=%s parts inside=%d" % [spec[0], got.kind,
-			got.dead or got.broken, got.sketchy, mounted])
+			duds += 1 if it.parent == got.id and it.dead else 0
+		print("CHECK used %s%s unpacked: it is a %s, ruined=%s sketchy=%s parts inside=%d dead parts=%d" % [spec[0],
+			" rig" if spec.size() > 3 else "", got.kind, got.dead or got.broken, got.sketchy, mounted, duds])
 	var ids_before: Array = market.listings.map(func(l: Dictionary) -> int: return l["id"])
 	market.tick(500.0, 0)
 	var ids_after: Array = market.listings.map(func(l: Dictionary) -> int: return l["id"])
