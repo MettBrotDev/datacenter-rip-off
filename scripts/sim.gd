@@ -31,6 +31,7 @@ const DOOR_FLOW := 0.2         # discharge coefficient / 3 of an open doorway (w
 const PAD_LOSS := 6000.0       # watts per degree of a pad with no walls: it is simply outdoors
 const ROOM_FLOOR := 16.0       # air conditioners do not cool a room below this
 const TAP_TEMP := 14.0         # water from the garden tap
+const TAP_COST := 6.0           # dollars a minute for the water such a loop runs down the drain
 const TAP_FLOW := 120.0        # watts per degree a loop fed from the tap gets rid of with the water it wastes
 const CHIP_TIME := 12.0        # ...and for a chip
 const COOLANT_TIME := 30.0     # ...and for the coolant in a loop
@@ -60,6 +61,7 @@ var weather := 0        # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
 var temps: Dictionary = {}     # circuit id -> degrees C of the air inside that building
 var wiring: Dictionary = {}    # circuit id -> watts currently drawn through that building's wiring
+var taps := 0           # coolant loops running on tap water right now: each one is on the water bill
 
 var _over: Dictionary = {}     # root key or strip id -> consecutive steps above its limit
 var _said: Dictionary = {}     # message key -> clock time it was last announced
@@ -348,6 +350,7 @@ func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into
 		heat: Dictionary, dt: float, events: Array) -> void:
 	var outside := outside_temp()
 	var weather_boost: float = Catalog.WEATHER[weather]["cooling"]
+	taps = 0
 	for pump: Node3D in world.items.values():
 		if not pump.def.has("pump"):
 			continue
@@ -378,6 +381,7 @@ func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into
 						indoors.append([c, per_degree, around])
 			if tank != null and tank.coolant_to < 0:   # fed from the tap: cold water in, warm water down the drain
 				shed += TAP_FLOW
+				taps += 1
 				air += TAP_FLOW * TAP_TEMP
 			var target: float = (air + into.get(pump.id, 0.0)) / shed if shed > 0.0 else 160.0
 			pump.heat += (target - pump.heat) * (1.0 - exp(-dt / COOLANT_TIME))

@@ -90,6 +90,8 @@ func state() -> Dictionary:
 
 ## Advances the company. `produced` = tokens/s from the servers, `houses` = how many houses we
 ## own, `rent_due` = whether we still rent the garage. Returns the change to the bank account.
+var water := 0.0   # $ per minute for tap water running through coolant loops; set by the world before tick()
+
 ## dt = 0 only refreshes the numbers (who gets how much) without moving time.
 func tick(dt: float, produced: float, money: float, houses: int, rent_due: bool, events: Array) -> float:
 	rate = produced if test_tps < 0.0 else test_tps
@@ -238,6 +240,8 @@ func tick(dt: float, produced: float, money: float, houses: int, rent_due: bool,
 		costs["Garage rent"] = Data.GARAGE_RENT
 	if houses > 0:
 		costs["Property tax"] = Data.PROPERTY_TAX * houses
+	if water > 0.0:
+		costs["Water bill"] = water
 	if active not in owned:
 		costs["%s licence" % m["name"]] = float(m["rent"])
 	if income > 0.0:

@@ -1511,6 +1511,7 @@ func _sim_step(dt: float) -> void:
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
 			ours += 1
+	_company.water = _sim.taps * Sim.TAP_COST
 	_sim.money += _company.tick(dt, _sim.tokens, _sim.money, ours, houses[0].state == House.NEIGHBOUR, events)
 	_sim.profit = _company.income
 	_announce(events)

@@ -409,7 +409,7 @@ func _update_actions() -> void:
 			acts.append(["", "%s. %s" % [moving, reading], Callable()])
 		if t.def.has("tank"):
 			acts.append(["", "Reservoir %d%% full%s" % [ceilf(t.fuel * 100.0),
-					"   kept full by the tap" if t.coolant_to < 0 else "   (bucket, or hose it to a tap)"], Callable()])
+					"   kept full by the tap ($%d a minute while the pump runs)" % Sim.TAP_COST if t.coolant_to < 0 else "   (bucket, or hose it to a tap)"], Callable()])
 		if t.kind == "bucket":
 			acts.append(["", "Full of water" if t.fuel > 0.0 else "Empty: fill it at a garden tap", Callable()])
 		if t.def.has("psu"):
