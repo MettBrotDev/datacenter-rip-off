@@ -19,6 +19,8 @@ const SIM_STEP := 0.5
 const Weather = preload("res://scripts/weather.gd")
 const House = preload("res://scripts/house.gd")
 const Dumpster = preload("res://scripts/dumpster.gd")
+const Pickup = preload("res://scripts/pickup.gd")
+const UsedMarket = preload("res://scripts/used_market.gd")
 const OpsBoard = preload("res://scripts/ops_board.gd")
 const Company = preload("res://scripts/company.gd")
 const OpsScreen = preload("res://scripts/ops_screen.gd")
@@ -55,6 +57,7 @@ var outside_temp := 20.0
 var cables: Cables
 var board: OpsBoard              # the dashboard every ops screen shows
 var co: Dictionary = {}          # the company as every peer sees it: see Company.state()
+var used: Dictionary = {}        # the second-hand market as every peer sees it: see UsedMarket.state()
 var profit := 0.0                # $ per second
 var wiring: Dictionary = {}      # circuit id -> watts drawn through that building's wiring
 var puddles: Array = []          # [{"pos", "radius", "left"}] water on the floor
@@ -67,6 +70,9 @@ var weather := 0                # index into Catalog.WEATHER
 
 var _garage: Garage
 var _dumpster: Dumpster
+var _pickup: Pickup
+var _market: UsedMarket         # host only
+var _parcel_cond: Dictionary = {}   # host only: parcel id -> {"cond", "actual"}: what is really in the box
 var _weather: Weather
 var _players: Node3D
 var _items: Node3D
@@ -101,6 +107,11 @@ func _ready() -> void:
 	_dumpster.rotation.y = -PI / 2   # button towards the driveway
 	add_child(_dumpster)
 	fixtures.merge(_dumpster.fixtures)
+	_pickup = Pickup.new()
+	_pickup.position = Vector3(-4.6, 0, 8.2)   # across the driveway from the dumpster
+	_pickup.rotation.y = PI / 2   # button towards the driveway
+	add_child(_pickup)
+	fixtures.merge(_pickup.fixtures)
 	_weather = Weather.new()
 	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
 	add_child(_weather)
@@ -120,6 +131,9 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		_sim = Sim.new()
 		_company = Company.new()
+		_market = UsedMarket.new()
+		_market.fill(0)
+		used = _market.state()
 		_spawn_starting_items()
 		_spawn_furniture()
 		_sim_step(0.0)
@@ -316,6 +330,8 @@ func debug_dump() -> String:
 		Catalog.WEATHER[weather]["name"]]
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
+	out += "\n  used=[%s]" % ",".join((used.get("listings", []) as Array).map(
+			func(l: Dictionary) -> String: return "%d:%s:%d" % [l["id"], l["kind"], l["price"]]))
 	for it: Item in items.values():
 		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d speed=%.3f asleep=%s pinned=%s" % [
 			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status,
@@ -357,6 +373,21 @@ func request_link(id: int, type: String, provider_id: int) -> void:
 
 func request_buy(kind: String) -> void:
 	_to_host(&"_h_buy", [kind])
+
+
+## Second-hand market: a listing id, or 0 and the kind of one of the always-in-stock staples.
+func request_buy_used(listing: int, staple := "") -> void:
+	_to_host(&"_h_buy_used", [listing, staple])
+
+
+## Second-hand market: ask a seller for a lower price (once per offer).
+func request_haggle_used(listing: int) -> void:
+	_to_host(&"_h_haggle_used", [listing])
+
+
+## Sell everything on the pick-up pallet.
+func request_sell() -> void:
+	_to_host(&"_h_sell", [])
 
 
 ## Open a delivered parcel: the box is gone, the thing inside stands in its place.
@@ -540,6 +571,7 @@ func _h_snapshot() -> void:
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
 				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened])
 	_r_door.rpc_id(peer, door_open)
+	_r_used.rpc_id(peer, _market.state())
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
 			_r_house.rpc_id(peer, h.id, h.state)
@@ -671,13 +703,106 @@ func _h_buy(kind: String) -> void:
 	if _sim.money < def["price"]:
 		return
 	_sim.money -= def["price"]
-	# dropped off as a parcel on the driveway, in the next free-ish slot of a 5 x 3 grid
+	_deliver(kind)
+	_cast(&"_r_toast", ["%s bought %s (-%s)" % [name_of(Net.sender()), def["label"], UI.money(def["price"])]])
+	_sim_step(0.0)
+
+
+## Host: a parcel with `kind` on its label arrives on the driveway, in the next free-ish slot of a 5 x 3 grid.
+## Returns the parcel's id.
+func _deliver(kind: String) -> int:
 	var slot := _deliveries % 15
 	_deliveries += 1
 	var height: float = Catalog.parcel(kind)["size"].y
 	var pos := Vector3(-2.0 + (slot % 5) * 1.0, height * 0.5 + 0.15, 7.0 + (slot / 5) * 1.2)
 	_spawn("parcel", Transform3D(Basis(), pos), kind)
-	_cast(&"_r_toast", ["%s bought %s (-%s)" % [name_of(Net.sender()), def["label"], UI.money(def["price"])]])
+	return _next_id - 1
+
+
+## Second-hand: a listing (by id) or a staple (listing 0 and its kind). The condition is decided
+## now but only applied, and only shown, when the parcel is unpacked.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_buy_used(listing: int, staple: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var who := name_of(Net.sender())
+	if listing == 0:
+		if staple not in UsedMarket.STAPLES:
+			return
+		var def: Dictionary = Catalog.ITEMS[staple]
+		if _sim.money < def["price"]:
+			return
+		_sim.money -= def["price"]
+		_deliver(staple)
+		_cast(&"_r_toast", ["%s bought a %s from %s (-%s)" % [who, def["label"].to_lower(), UsedMarket.STAPLE_SELLER, UI.money(def["price"])]])
+		_sim_step(0.0)
+		return
+	var refusal := _market.can_buy(listing, _sim.money)
+	if refusal != "":
+		_notice_to(Net.sender(), refusal)
+		return
+	var l := _market.take(listing)
+	_sim.money -= l["price"]
+	_parcel_cond[_deliver(l["kind"])] = {"cond": l["cond"], "actual": l["actual"]}
+	_cast(&"_r_toast", ["%s bought %s from %s (-%s)" % [who, Catalog.ITEMS[l["kind"]]["label"].to_lower(), l["seller"], UI.money(l["price"])]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_haggle_used(listing: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var result := _market.haggle(listing)
+	if not result.is_empty():
+		_cast(&"_r_toast", [result["text"]])
+		_sim_step(0.0)
+
+
+func _notice_to(peer: int, text: String) -> void:
+	if peer == multiplayer.get_unique_id():
+		_r_notice(text)
+	else:
+		_r_notice.rpc_id(peer, text)
+
+
+## Sell everything on the pallet: working things for a share of the price, ruined ones as scrap.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_sell() -> void:
+	if not multiplayer.is_server():
+		return
+	var doomed := {}
+	for it: Item in items.values():
+		if it.holder == 0 and it.parent == 0 and _pickup.holds(it.global_position):
+			doomed[it.id] = true
+	var grew := true
+	while grew:   # whatever is mounted on something on the pallet goes with it
+		grew = false
+		for it: Item in items.values():
+			if it.parent != 0 and doomed.has(it.parent) and not doomed.has(it.id):
+				doomed[it.id] = true
+				grew = true
+	var total := 0
+	var lines := {}   # label -> [count, money]
+	for id: int in doomed:
+		var it: Item = items[id]
+		var ruined: bool = it.broken or it.dead
+		var value := UsedMarket.sale_value(it.kind, ruined, it.contains)
+		var label: String = ("ruined " if ruined else "") + it.label.to_lower()
+		var row: Array = lines.get(label, [0, 0])
+		lines[label] = [row[0] + 1, row[1] + value]
+		total += value
+		_parcel_cond.erase(id)
+		_cast(&"_r_despawn", [id])
+	if doomed.is_empty():
+		_cast(&"_r_toast", ["%s pressed the pick-up button. Nothing on the pallet. The courier sighs." % name_of(Net.sender())])
+		return
+	_sim.money += total
+	var bits: Array[String] = []
+	for label: String in lines:
+		bits.append("%s%s %s" % ["%dx " % lines[label][0] if lines[label][0] > 1 else "", label, UI.money(lines[label][1])])
+	var shown := ", ".join(bits.slice(0, 4)) + (" and %d more kinds" % (bits.size() - 4) if bits.size() > 4 else "")
+	_cast(&"_r_toast", ["%s sold %d %s for %s: %s" % [name_of(Net.sender()), doomed.size(),
+		"thing" if doomed.size() == 1 else "things", UI.money(total), shown]])
 	_sim_step(0.0)
 
 
@@ -692,13 +817,44 @@ func _h_unpack(id: int) -> void:
 	if p.position.distance_to(box.global_position) > 5.0:
 		return
 	var inside: String = box.contains
+	var cond := "fine"
+	var fate: Dictionary = _parcel_cond.get(id, {})
+	if not fate.is_empty():   # second-hand: what is really in the box
+		cond = fate["cond"]
+		inside = fate["actual"]
+		_parcel_cond.erase(id)
 	var lift: float = (Catalog.ITEMS[inside]["size"].y - box.def["size"].y) * 0.5 + 0.02
 	var xf := Transform3D(Basis(Vector3.UP, box.global_rotation.y), box.global_position + Vector3(0, lift, 0))
+	var advertised: String = Catalog.ITEMS[box.contains]["label"].to_lower()
 	_cast(&"_r_despawn", [id])
 	_spawn(inside, xf)
-	if Catalog.ITEMS[inside].get("used", false) and randf() < doa_chance:
-		items[_next_id - 1].dead = true
-		_cast(&"_r_toast", ["The %s was dead on arrival. No refunds." % Catalog.ITEMS[inside]["label"].to_lower()])
+	var thing: Item = items[_next_id - 1]
+	if fate.is_empty():
+		if Catalog.ITEMS[inside].get("used", false) and randf() < doa_chance:
+			thing.dead = true
+			_cast(&"_r_toast", ["The %s was dead on arrival. No refunds." % Catalog.ITEMS[inside]["label"].to_lower()])
+	else:
+		match cond:
+			"dead":
+				thing.dead = true
+				_cast(&"_r_toast", ["The %s was dead on arrival. \"Sold for parts\", said the listing." % advertised])
+			"sketchy":
+				thing.sketchy = true   # no toast: you find out when it gets warm
+			"soaked":
+				_cast(&"_r_puddle", [Vector3(xf.origin.x, 0.02, xf.origin.z), 0.6, 12.0])
+				_cast(&"_r_toast", ["The %s arrived pre-soaked and is dripping. Grab it, quickly!" % advertised])
+			"brick":
+				_cast(&"_r_toast", ["The parcel held %s and a note: \"sold as seen\"." % Catalog.ITEMS[inside]["label"].to_lower()])
+			"swapped":
+				_cast(&"_r_toast", ["That is not a %s. It is a %s. The note says \"close enough\"." % [
+					advertised, Catalog.ITEMS[inside]["label"].to_lower()]])
+			"bonus":
+				for kind: String in ["cpu_celery", "ram_8"]:
+					var slot := free_slot(thing, Catalog.ITEMS[kind]["group"])
+					if slot >= 0:
+						_cast(&"_r_spawn", [_next_id, kind, thing.global_transform, [0, thing.id, slot, 0, 0, false, "", 0, 0, false]])
+						_next_id += 1
+				_cast(&"_r_toast", ["The %s came with a few things still inside it. Lucky you." % advertised])
 	_sim_step(0.0)
 
 
@@ -1059,6 +1215,8 @@ func _sim_step(dt: float) -> void:
 	_sim.profit = _company.income
 	_announce(events)
 	_cast(&"_r_company", [_company.state()])
+	_market.tick(dt, _company.level())
+	_cast(&"_r_used", [_market.state()])
 	var gens := {}   # everything with moving parts: generators, pumps, tanks, buckets, servers, hoses
 	for it: Item in items.values():
 		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \
@@ -1246,6 +1404,12 @@ func _r_company(state: Dictionary) -> void:
 	co = state
 	fixtures[-3].provides = "" if co["overdue"] else "net"   # no money, no internet in the garage
 	hud.company_changed()
+
+
+## The second-hand market's offers (never their hidden conditions).
+@rpc("authority", "call_remote", "reliable")
+func _r_used(state: Dictionary) -> void:
+	used = state
 
 
 ## A message for one player only (why something they asked for was refused).

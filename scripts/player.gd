@@ -407,6 +407,8 @@ func _update_actions() -> void:
 				acts.append(["interact", "[E] Demolish this house (press twice)", _world.request_demolish.bind(t.house)])
 			"bin":
 				acts.append(["interact", "[E] Empty the dumpster. Everything in it is gone for good.", _world.request_empty_bin])
+			"sell":
+				acts.append(["interact", "[E] Sell everything on the pallet. The courier pays cash, and judges.", _world.request_sell])
 			"door":
 				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
 						_world.request_door])

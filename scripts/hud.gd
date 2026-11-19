@@ -223,6 +223,12 @@ func open_shop() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
+## The parts market, opened on its second-hand side.
+func open_used_market() -> void:
+	_shop.set_mode("used")
+	open_shop()
+
+
 func _build_pause() -> void:
 	_pause = ColorRect.new()
 	_pause.color = Color(0.01, 0.02, 0.05, 0.6)

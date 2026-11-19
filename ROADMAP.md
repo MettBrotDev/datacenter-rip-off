@@ -48,7 +48,7 @@ Asked for by the owner, not built yet:
 - **Neighbour complaints**: about generator noise, smoke, power cuts, cables across their lawn...
 - **Demonstrations**: neighbours protesting outside the datacenter when things get bad enough.
 
-Other ideas: neighbours with routines, selling furniture, merging adjacent pads, vehicles for the
+Other ideas: neighbours with routines, merging adjacent pads, vehicles for the
 bigger map, a hardware store you walk to.
 
 ## Lighting
