@@ -94,8 +94,9 @@ func _ready() -> void:
 
 func set_door(open: bool) -> void:
 	_door_shape.set_deferred("disabled", open)
-	create_tween().tween_property(_door, "position:y", DOOR_Y + (2.42 if open else 0.0), 0.8) \
-			.set_trans(Tween.TRANS_SINE)
+	var tween := create_tween().set_parallel().set_trans(Tween.TRANS_SINE)   # rolls up into the lintel
+	tween.tween_property(_door, "position:y", 2.44 if open else DOOR_Y, 0.8)
+	tween.tween_property(_door, "scale:y", 0.04 if open else 1.0, 0.8)
 
 
 func _fixture(id: int, kind: String, pos: Vector3, yaw: float) -> void:
