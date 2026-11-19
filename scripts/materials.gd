@@ -91,3 +91,53 @@ static func hardware(color: Color, energy := 0.0) -> StandardMaterial3D:
 	m.clearcoat = lerpf(0.12, 0.6, dark)
 	m.clearcoat_roughness = lerpf(0.3, 0.12, dark)
 	return m
+
+
+## A cached hardware material with an explicit finish: "" (pick from the colour, like `hardware`),
+## "metal" (machined steel), "brushed", "chrome", "gold", "plastic" (glossy), "matte", "rubber",
+## "pcb" (lacquered board), "glass" (see-through, colour alpha sets how clear) or "paint".
+## Same parameters = the same material, so never mutate the result (duplicate it first).
+static func part(color: Color, finish := "", energy := 0.0) -> StandardMaterial3D:
+	var key := "p %s %s %.2f" % [color, finish, energy]
+	if _cache.has(key):
+		return _cache[key]
+	var m: StandardMaterial3D
+	if energy > 0.0 or finish == "" or finish == "paint":
+		m = hardware(color, energy)
+	else:
+		m = StandardMaterial3D.new()
+		m.albedo_color = color
+		m.metallic_specular = 0.6
+		match finish:
+			"metal":
+				m.roughness = 0.34
+				m.metallic = 0.75
+			"brushed":
+				m.roughness = 0.5
+				m.metallic = 0.7
+			"chrome":
+				m.roughness = 0.14
+				m.metallic = 0.9
+			"gold":
+				m.roughness = 0.25
+				m.metallic = 0.85
+			"plastic":
+				m.roughness = 0.3
+				m.clearcoat_enabled = true
+				m.clearcoat = 0.4
+				m.clearcoat_roughness = 0.2
+			"rubber":
+				m.roughness = 0.95
+				m.metallic_specular = 0.15
+			"pcb":
+				m.roughness = 0.75
+				m.metallic_specular = 0.3
+			"glass":
+				m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				m.roughness = 0.05
+				m.metallic_specular = 0.9
+				m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			_:   # "matte"
+				m.roughness = 0.85
+	_cache[key] = m
+	return m

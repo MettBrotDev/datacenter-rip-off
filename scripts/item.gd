@@ -86,11 +86,9 @@ func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 		_lid_shape.shape = lid_shape
 		_lid_shape.position = lid[1]
 		add_child(_lid_shape)
-		var lid_mat := StandardMaterial3D.new()
-		lid_mat.albedo_color = lid[2]
-		lid_mat.roughness = 0.45
-		lid_mat.metallic = 0.4
-		_lid = Catalog.Shapes.instance(Catalog.Shapes.rounded_box(lid[0], 0.006, 1), lid_mat, lid[1])
+		_lid = MeshInstance3D.new()
+		_lid.mesh = Catalog.baked_mesh(Catalog.lid_parts(def))
+		_lid.position = lid[1]
 		add_child(_lid)
 	if kind == "parcel":   # say what is inside, on the front and the back of the box
 		var size: Vector3 = def["size"]
@@ -261,10 +259,27 @@ func _ruin() -> void:
 	label = "Ruined %s" % def["label"].to_lower()
 	for child: Node in get_children():
 		var mesh := child as MeshInstance3D
-		if mesh and mesh.material_override is StandardMaterial3D:
-			var mat: StandardMaterial3D = mesh.material_override
-			mat.albedo_color = mat.albedo_color.darkened(0.6).lerp(Color(0.25, 0.2, 0.15), 0.4)
-			mat.roughness = 1.0
+		if mesh == null or mesh == _shell:
+			continue
+		if mesh.material_override is StandardMaterial3D:   # a status light: its own material
+			_scorch(mesh.material_override)
+		elif mesh.mesh:   # baked bodies share their materials between items: scorch copies
+			for s in mesh.mesh.get_surface_count():
+				var src := mesh.mesh.surface_get_material(s) as StandardMaterial3D
+				if src:
+					var copy: StandardMaterial3D = src.duplicate()
+					_scorch(copy)
+					mesh.set_surface_override_material(s, copy)
+
+
+func _scorch(mat: StandardMaterial3D) -> void:
+	mat.albedo_color = mat.albedo_color.darkened(0.6).lerp(Color(0.25, 0.2, 0.15), 0.4)
+	mat.albedo_color.a = 1.0
+	mat.roughness = 1.0
+	mat.metallic = 0.0
+	mat.clearcoat_enabled = false
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	mat.emission_enabled = false
 
 
 func release(xf: Transform3D, vel: Vector3, pin := false) -> void:

@@ -18,6 +18,7 @@ extends Node
 ##   --used                 open the parts market on its second-hand side
 ##   --bench                host: put two opened, fully fitted machines on the driveway
 ##   --cables               host: cable up the garage, three machines loosely and one neatly pinned
+##   --showroom[=RAISE]     host: one of every catalog item in rows on the driveway and lawn (a line along X at z = 7, positions printed), to photograph
 ##   --pitch=DEG            initial look up (+) or down (-) of the local player
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
@@ -119,6 +120,8 @@ func _handle_args() -> void:
 		world.debug_bench()
 	if args.has("cables") and world:
 		world.debug_cables()
+	if args.has("showroom") and world:
+		world.debug_showroom(float(args["showroom"]) if args["showroom"] != "" else 1.0)
 	if args.has("pitch") and world:
 		world.player(multiplayer.get_unique_id()).head.rotation.x = deg_to_rad(float(args["pitch"]))
 	if args.has("shop") and world:
