@@ -578,8 +578,7 @@ func _spawn_starting_items() -> void:
 	# The server already has a CPU and one stick of RAM in it; the GPU you install yourself.
 	var kit := [["server", Vector3(-1.6, 0, -1.2)], ["gpu_1080", Vector3(-0.8, 0, -1.2)],
 		["screwdriver", Vector3(-0.8, 0, -0.8)],
-		["powerstrip", Vector3(-0.1, 0, -1.2)], ["gen_bike", Vector3(1.4, 0, -1.4)],
-		["crate", Vector3(-2.6, 0, -1.4)], ["crate", Vector3(2.8, 0, -1.6)]]
+		["powerstrip", Vector3(-0.1, 0, -1.2)], ["gen_bike", Vector3(1.4, 0, -1.4)]]
 	for entry: Array in kit:
 		var height: float = Catalog.ITEMS[entry[0]]["size"].y
 		_spawn(entry[0], Transform3D(Basis(), entry[1] + Vector3(0, height * 0.5 + 0.05, 0)))

@@ -308,7 +308,10 @@ func _selftest() -> void:
 	world.request_trip(strip.id, "power")
 	_check("tripped over the strip's cable (plugged into %d)" % strip.power_to)
 
-	# 11. dumpster: put the two starter crates in, press the button
+	# 11. dumpster: put two crates in, press the button
+	for x: float in [-2.6, 2.8]:
+		world._spawn("crate", Transform3D(Basis(), Vector3(x, 0.4, -1.5)))
+	await _wait(0.5)
 	var before := _count("crate")
 	for it: Node3D in world.items.values().duplicate():
 		if it.kind == "crate":
