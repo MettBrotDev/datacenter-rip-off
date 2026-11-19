@@ -93,7 +93,7 @@ func _ready() -> void:
 	var keys := HBoxContainer.new()
 	keys.add_theme_constant_override("separation", 14)
 	hints.add_child(keys)
-	for pair: Array in [["WASD", "Move"], ["Shift", "Sprint"], ["Space", "Jump"], ["E", "Grab"], ["Q", "Use"], ["R", "Rotate"],
+	for pair: Array in [["WASD", "Move"], ["Shift", "Sprint"], ["Space", "Jump"], ["LMB", "Grab / put down"], ["RMB", "Throw"], ["E", "Interact"], ["Q", "Use"], ["R", "Rotate"],
 			["F", "Power"], ["G", "Network"], ["H", "Coolant"], ["Esc", "Pause"]]:
 		var one := HBoxContainer.new()
 		one.add_theme_constant_override("separation", 5)

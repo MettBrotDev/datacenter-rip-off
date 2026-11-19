@@ -308,14 +308,14 @@ func _update_actions() -> void:
 			elif why != "":
 				acts.append(["", why, Callable()])
 			else:
-				acts.append(["throw", "[Click] Plug into %s" % t.label.to_lower(), _plug.bind(t.id)])
+				acts.append(["primary", "[LMB] Plug into %s" % t.label.to_lower(), _plug.bind(t.id)])
 		else:
 			# Tidy or messy is up to you: click walls, floors and ceilings to clip the cable down
 			# along the way, or just drag it straight across the room.
 			var spot: Variant = _pin_spot()
 			var why: String = "" if spot == null else _world.route_problem(from, pins + [spot], spot)
 			if spot != null and why == "":
-				acts.append(["throw", "[Click] Pin the %s here" % WORDS[type], _pin.bind(spot)])
+				acts.append(["primary", "[LMB] Pin the %s here" % WORDS[type], _pin.bind(spot)])
 			elif spot != null:
 				acts.append(["", why, Callable()])
 			acts.append(["", "Holding a %s. Plug it in somewhere, or pin it along the way to keep it tidy." % WORDS[type], Callable()])
@@ -341,7 +341,7 @@ func _update_actions() -> void:
 			var mount := _mount_spot(held, t)
 			if mount.size() == 2:
 				_place_xf = mount[0].global_transform * (mount[0].def["slots"][mount[1]]["xf"] as Transform3D)
-				acts.append(["interact", "[E] Install in the %s" % mount[0].label.to_lower(),
+				acts.append(["primary", "[LMB] Install in the %s" % mount[0].label.to_lower(),
 						_world.request_attach.bind(mount[0].id, mount[1])])
 			elif mount.size() == 1:
 				acts.append(["", mount[0], Callable()])
@@ -350,18 +350,18 @@ func _update_actions() -> void:
 			if mount.size() == 2:
 				pass
 			elif _place_xf != null:
-				acts.append(["interact", "[E] Place here", _place])
+				acts.append(["primary", "[LMB] Place here", _place])
 				acts.append(["rotate", "[R] Rotate", _rotate])
 			else:
-				acts.append(["interact", "[E] Drop", _world.request_release.bind(false)])
+				acts.append(["primary", "[LMB] Drop", _world.request_release.bind(false)])
 		if held.kind == "extinguisher" and t is RigidBody3D and t.on_fire():
-			acts.append(["throw", "[Click] Put out the fire", _world.request_extinguish.bind(t.id)])
+			acts.append(["throw", "[RMB] Put out the fire", _world.request_extinguish.bind(t.id)])
 		else:
-			acts.append(["throw", "[Click] Throw", _world.request_release.bind(true)])
+			acts.append(["throw", "[RMB] Throw", _world.request_release.bind(true)])
 	elif t is RigidBody3D:
 		if t.on_fire():
 			acts.append(["", "ON FIRE. Get a fire extinguisher!", Callable()])
-		acts.append(["interact", "[E] %s %s" % ["Pull out" if t.parent != 0 else "Pick up", t.label.to_lower()],
+		acts.append(["primary", "[LMB] %s %s" % ["Pull out" if t.parent != 0 else "Pick up", t.label.to_lower()],
 				_world.request_grab.bind(t.id)])
 		for type: String in ["power", "net", "coolant"]:
 			if not t.def.get(type + "_port", false):

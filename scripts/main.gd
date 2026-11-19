@@ -57,10 +57,11 @@ func _setup_input() -> void:
 		ev.physical_keycode = keys[action]
 		InputMap.add_action(action)
 		InputMap.action_add_event(action, ev)
-	var click := InputEventMouseButton.new()
-	click.button_index = MOUSE_BUTTON_LEFT
-	InputMap.add_action("throw")
-	InputMap.action_add_event("throw", click)
+	for button: Array in [["primary", MOUSE_BUTTON_LEFT], ["throw", MOUSE_BUTTON_RIGHT]]:   # grab / put down, throw
+		var click := InputEventMouseButton.new()
+		click.button_index = button[1]
+		InputMap.add_action(button[0])
+		InputMap.action_add_event(button[0], click)
 
 
 func _on_joined() -> void:
@@ -197,8 +198,8 @@ func _selftest() -> void:
 	me.rotation.y = -PI / 2
 	me.head.rotation.x = -0.24
 	await _wait(0.6)
-	var key := InputEventKey.new()
-	key.physical_keycode = KEY_E
+	var key := InputEventMouseButton.new()   # left click puts down what you hold
+	key.button_index = MOUSE_BUTTON_LEFT
 	key.pressed = true
 	key.set_meta("test", true)   # the player ignores every other key press during test runs
 	Input.parse_input_event(key)

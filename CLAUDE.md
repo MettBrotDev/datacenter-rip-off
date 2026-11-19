@@ -105,7 +105,9 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   Outdoors = not under the garage or a standing house (`world.is_outdoors`).
 - The rain you see is GPU particles colliding with a top-down height field around the camera (`weather.gd`),
   so it falls outside windows and doors but not under roofs.
-- Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
+- Keys: left click picks up, puts down, installs, plugs and pins; right click throws; E is for fixtures and
+  tools (doors, shop, console, lids, refuelling); Q uses; F/G/H grab the power/network/coolant end.
+- Items placed with a left click on a surface are pinned (no physics) until grabbed or their support disappears.
 - The town: `scripts/town.gd` is the layout (streets, 37 lots, park, bounds) shared by scenery and gameplay.
   `scripts/outside.gd` is pure scenery built on it (one subagent-written file, heavily MultiMesh-batched).
   `scripts/shapes.gd` makes the soft-edged meshes everything uses.
