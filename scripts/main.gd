@@ -16,11 +16,16 @@ extends Node
 ##   --shop                 open the parts market
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
+##   --port=N               UDP port to host/join on (default 24565)
+##   --pose=N               host: character showcase, set 1..4 of dummies frozen in one situation each
+##                          (--pose_t=SECONDS: freeze the animation at that moment, --pose_yaw=DEG: their facing,
+##                          --pose_pick=0,2: only those entries of the set)
 ##   --probe=SECONDS        print world state after N seconds, then quit
 ##   --shot=PATH            save a screenshot after --wait=SECONDS (default 2.5), then quit
 
 const World = preload("res://scripts/world.gd")
 const Menu = preload("res://scripts/menu.gd")
+const PoseStage = preload("res://scripts/pose_stage.gd")
 
 var world: Node3D
 var menu: Control
@@ -105,6 +110,10 @@ func _handle_args() -> void:
 		world.hud.open_shop()
 	if args.has("open") and world:
 		world.request_door()
+	if args.has("pose") and world:
+		var stage := PoseStage.new()
+		world.add_child(stage)
+		stage.setup(int(args["pose"]), float(args.get("pose_t", "0")), float(args.get("pose_yaw", "180")), args.get("pose_pick", ""))
 	if args.has("selftest"):
 		_selftest()
 	if args.has("probe"):

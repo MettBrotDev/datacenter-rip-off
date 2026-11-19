@@ -30,6 +30,8 @@ var fixtures: Dictionary = {}   # fixture id -> Fixture; the world merges these 
 var _w := 0.0
 var _d := 0.0
 var _px := 0.0                  # x of the wall between living room and bedroom
+var _npc_acc := 0.0
+var _npc_tick := 0
 var _door_x := 0.0              # centre of the front door
 var _shell: Node3D              # everything that disappears when the house is demolished
 var _solid: StaticBody3D
@@ -96,7 +98,31 @@ func set_door(open: bool) -> void:
 
 func _process(dt: float) -> void:
 	if _npc_blob:
-		_npc_blob.animate(dt, 0.0, 0.0)
+		_animate_npc(dt)
+
+
+## The neighbour idles, and turns to watch whoever is nearest (this peer's camera or another player).
+func _animate_npc(dt: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var here := _npc_blob.global_position
+	var nearest := INF
+	var watch: Variant = null
+	if cam:
+		nearest = here.distance_to(cam.global_position)
+		watch = cam.global_position
+	if nearest > 60.0:
+		return   # nobody can see it from here
+	_npc_acc += dt
+	_npc_tick += 1
+	if nearest > 30.0 and _npc_tick % 3 != 0:
+		return   # far away: animate at a third of the rate
+	for s: Array in Net.pstates.values():
+		var spot: Vector3 = s[0] + Vector3(0, 1.4, 0)
+		if here.distance_to(spot) < nearest:
+			nearest = here.distance_to(spot)
+			watch = spot
+	_npc_blob.animate(_npc_acc, {"npc": true, "look_at": watch})
+	_npc_acc = 0.0
 
 
 # --- construction -----------------------------------------------------------------
@@ -179,7 +205,7 @@ func _build_fixtures() -> void:
 	rng.seed = 5000 + id
 	_npc_blob = Blob.new()
 	npc.add_child(_npc_blob)
-	_npc_blob.setup(Color.from_hsv(rng.randf(), 0.55, 0.9))
+	_npc_blob.setup(Color.from_hsv(rng.randf(), 0.55, 0.9), id + 1)
 	_npc_blob.rotation.y = PI   # blobs face -Z; the neighbour looks out at the street
 	var tag := Label3D.new()
 	tag.text = lot["name"].capitalize()

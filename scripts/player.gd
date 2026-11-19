@@ -31,6 +31,8 @@ var _send_t := 0.0
 var _bot_t := 0.0
 var _last_pos := Vector3.ZERO
 var _spawn := Vector3.ZERO
+var _air_hold := 0.0          # remote players: seconds left of "in the air"
+var _exp_est := 0.0           # remote players: estimated overheating (same sums as the owner)
 var _stumble := 0.0           # seconds left without control after tripping
 var _trip_wait := 0.0         # seconds until we can trip again
 var _ghost: MeshInstance3D    # preview of where the held item would be placed
@@ -61,6 +63,7 @@ func _ready() -> void:
 	_blob = Blob.new()
 	add_child(_blob)
 	_blob.setup(info["color"])
+	process_priority = -1   # before the items, so a carried one follows the hands of this frame
 	head = Node3D.new()
 	head.position.y = 1.4
 	add_child(head)
@@ -137,6 +140,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		return
 	for act: Array in _acts:
 		if act[0] != "" and e.is_action_pressed(act[0]):
+			_blob.poke()
 			act[2].call()
 			return
 
@@ -160,7 +164,38 @@ func _process(dt: float) -> void:
 	velocity_estimate = (position - _last_pos) / dt
 	_last_pos = position
 	var pace := Vector2(velocity_estimate.x, velocity_estimate.z).length()
-	_blob.animate(dt, 5.0 if _world.ridden_by(peer_id) else pace, head.rotation.x)
+	_animate_blob(dt, pace)
+
+
+## Tells the blob what this player is doing. Everything but stumbling and overheating can be seen
+## from the world state on every peer; for other players those two are estimated or left out.
+func _animate_blob(dt: float, pace: float) -> void:
+	var held: Node3D = _world.held_by(peer_id)
+	var bike: Node3D = _world.ridden_by(peer_id)
+	var suited: bool = _world.worn_by(peer_id) != null
+	var air := not is_on_floor()
+	if not is_local:
+		_air_hold = 0.12 if absf(velocity_estimate.y) > 1.2 else _air_hold - dt
+		air = _air_hold > 0.0
+		if suited or _world.temp_at(position) <= HEAT_SAFE:   # same sums as _feel_heat
+			_exp_est = maxf(0.0, _exp_est - dt / 20.0)
+		else:
+			_exp_est = minf(_exp_est + dt * (_world.temp_at(position) - HEAT_SAFE) / HEAT_SCALE, 1.0)
+	var st := {"speed": pace, "vel": velocity_estimate, "vy": velocity_estimate.y, "air": air,
+			"pitch": head.rotation.x, "suit": suited, "ride": -1.0,
+			"exposure": exposure if is_local else _exp_est,
+			"stumble": 1.0 if (is_local and _stumble > 0.0) else 0.0,
+			"cable": is_local and not _cable.is_empty()}
+	if held:
+		st["held"] = held.def
+	if bike:
+		var watts: float = bike.def["gen"]["watts"]
+		st["ride"] = clampf(bike.load / watts, 0.0, 1.0)
+		st["ride_yaw"] = wrapf(bike.global_rotation.y - global_rotation.y, -PI, PI)
+		st["speed"] = 0.0
+	_blob.animate(dt, st)
+	if held and not is_local:   # the item sits between the character's hands
+		hand.global_transform = _blob.global_transform * _blob.carry_xf()
 
 
 func _move(dt: float) -> void:
