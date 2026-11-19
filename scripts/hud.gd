@@ -7,6 +7,7 @@ const Catalog = preload("res://scripts/catalog.gd")
 const Shop = preload("res://scripts/shop.gd")
 const Offer = preload("res://scripts/offer.gd")
 const SETTINGS_MENU := "res://scripts/settings_menu.gd"
+const COMPANY_MENU := "res://scripts/company_menu.gd"
 
 var _prompt: Label
 var _list: VBoxContainer
@@ -17,6 +18,7 @@ var _shop: Control
 var _heat: ColorRect
 var _heat_text: Label
 var _offer: Control
+var _company: Control   # the company menu (Tab), if that script exists
 var _settings: Control
 
 
@@ -88,7 +90,7 @@ func _ready() -> void:
 	hints.size_flags_vertical = Control.SIZE_SHRINK_END
 	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hints)
-	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power   G Network   H Coolant   Esc Pause", 14, UI.DIM))
+	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power   G Network   H Coolant   Tab Company   Esc Pause", 14, UI.DIM))
 
 	_shop = Shop.new()
 	_shop.world = get_parent()
@@ -100,6 +102,12 @@ func _ready() -> void:
 	_offer.hide()
 	_offer.closed.connect(_close_overlays)
 	add_child(_offer)
+	if ResourceLoader.exists(COMPANY_MENU):
+		_company = load(COMPANY_MENU).new()
+		_company.world = get_parent()
+		_company.hide()
+		_company.closed.connect(_close_overlays)
+		add_child(_company)
 	_build_pause()
 
 
@@ -191,6 +199,19 @@ func offer_reply(house_id: int, text: String, accepted: bool) -> void:
 	_offer.reply(house_id, text, accepted)
 
 
+## The company menu. `tab` is one of "overview", "slop", "products", "lab", "platform", "market".
+func open_company(tab := "overview") -> void:
+	if _company:
+		_company.open(tab)
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## The replicated company state (world.co) was just updated.
+func company_changed() -> void:
+	if _company and _company.visible:
+		_company.refresh()
+
+
 func open_shop() -> void:
 	_shop.show()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -233,8 +254,14 @@ func _build_pause() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	if e.is_action_pressed("company") and not Net.test_mode and not _shop.visible and not _offer.visible and not _pause.visible:
+		if _company and _company.visible:
+			_close_overlays()
+		else:
+			open_company()
+		get_viewport().set_input_as_handled()
 	if e.is_action_pressed("ui_cancel") and not Net.test_mode:
-		if _shop.visible or _offer.visible or _pause.visible:
+		if _shop.visible or _offer.visible or _pause.visible or (_company and _company.visible):
 			_close_overlays()
 		else:
 			_pause.show()
@@ -246,4 +273,6 @@ func _close_overlays() -> void:
 	_shop.hide()
 	_offer.hide()
 	_pause.hide()
+	if _company:
+		_company.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED

@@ -20,6 +20,7 @@ const Weather = preload("res://scripts/weather.gd")
 const House = preload("res://scripts/house.gd")
 const Dumpster = preload("res://scripts/dumpster.gd")
 const OpsBoard = preload("res://scripts/ops_board.gd")
+const Company = preload("res://scripts/company.gd")
 const OpsScreen = preload("res://scripts/ops_screen.gd")
 const Town = preload("res://scripts/town.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
@@ -53,6 +54,7 @@ var temps: Dictionary = {}       # circuit id -> degrees C inside that building
 var outside_temp := 20.0
 var cables: Cables
 var board: OpsBoard              # the dashboard every ops screen shows
+var co: Dictionary = {}          # the company as every peer sees it: see Company.state()
 var profit := 0.0                # $ per second
 var wiring: Dictionary = {}      # circuit id -> watts drawn through that building's wiring
 var puddles: Array = []          # [{"pos", "radius", "left"}] water on the floor
@@ -68,6 +70,7 @@ var _weather: Weather
 var _players: Node3D
 var _items: Node3D
 var _sim: Sim                   # host only
+var _company: Company           # host only
 var _haggle: Dictionary = {}    # host only: house id -> {"reserve", "mood", "until"}
 var _demolish_asked: Dictionary = {}   # host only: house id -> time of the first press
 var _next_id := 1
@@ -115,6 +118,7 @@ func _ready() -> void:
 	_reconcile_players()
 	if multiplayer.is_server():
 		_sim = Sim.new()
+		_company = Company.new()
 		_spawn_starting_items()
 		_spawn_furniture()
 		_sim_step(0.0)
@@ -323,6 +327,15 @@ func request_unwear() -> void:
 ## The local player passed out from the heat.
 func request_fainted() -> void:
 	_to_host(&"_h_fainted", [])
+
+
+## Ask the company to do something. Actions and their arguments:
+##   "sell" [tokens, 0 = all]        "start" [kind "slop"|"product", key, size 0-2, risk 0-2]
+##   "update" [live id]   "retire" [live id]   "cancel" [job id]   "rush" [job id]
+##   "train" []           "advertise" [campaign key]              "share" [0..1]
+## A refusal comes back to the asker as a notice (hud.toast).
+func request_company(action: String, args: Array = []) -> void:
+	_to_host(&"_h_company", [action, args])
 
 
 func request_empty_bin() -> void:
@@ -679,6 +692,56 @@ func _h_fainted() -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
+func _h_company(action: String, args: Array) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := Net.sender()
+	var events: Array = []
+	var result := "Unknown action"
+	match [action, args.size()]:
+		["sell", 1]:
+			result = _company.sell(float(args[0]), events)
+		["start", 4]:
+			result = _company.start(str(args[0]), str(args[1]), int(args[2]), int(args[3]))
+			if result == "":
+				events.append("%s started building: %s" % [name_of(peer), _company.jobs[-1]["name"]])
+		["update", 1]:
+			result = _company.update(int(args[0]), events)
+		["retire", 1]:
+			result = _company.retire(int(args[0]))
+		["cancel", 1]:
+			result = _company.cancel(int(args[0]))
+		["rush", 1]:
+			result = _company.rush(int(args[0]), _sim.money)
+		["train", 0]:
+			result = _company.train()
+			if result == "":
+				events.append("%s started training a new model. Do not unplug anything." % name_of(peer))
+		["advertise", 1]:
+			result = _company.advertise(str(args[0]), _sim.money)
+		["share", 1]:
+			result = _company.set_share(float(args[0]))
+	if result.begins_with("$"):          # the company wants money moved
+		_sim.money += float(result.substr(1))
+	elif result != "":                   # refused: tell only whoever asked
+		if peer == multiplayer.get_unique_id():
+			_r_notice(result)
+		else:
+			_r_notice.rpc_id(peer, result)
+	_announce(events)
+	_sim_step(0.0)
+
+
+## Host: show company events to everyone. Entries like "$-500" are charges, not messages.
+func _announce(events: Array) -> void:
+	for text: String in events:
+		if text.begins_with("$"):
+			_sim.money += float(text.substr(1))
+		else:
+			_cast(&"_r_toast", [text])
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func _h_empty_bin() -> void:
 	if not multiplayer.is_server():
 		return
@@ -883,8 +946,10 @@ func _sim_step(dt: float) -> void:
 	_drop_unsupported()
 	var events: Array = []
 	var status := _sim.step(self, dt, events)
-	for text: String in events:
-		_cast(&"_r_toast", [text])
+	_sim.money += _company.tick(dt, _sim.tokens, events)
+	_sim.profit = _company.income
+	_announce(events)
+	_cast(&"_r_company", [_company.state()])
 	var gens := {}   # everything with moving parts: generators, pumps, tanks, buckets, servers, hoses
 	for it: Item in items.values():
 		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \
@@ -1057,6 +1122,18 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 			f.set_lamp(1 if tripped_circuits.has(f.circuit) else 2)
 	hud.set_stats(money, tokens, watts, capacity, company[4], tripped)
 	board.refresh(self)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_company(state: Dictionary) -> void:
+	co = state
+	hud.company_changed()
+
+
+## A message for one player only (why something they asked for was refused).
+@rpc("authority", "call_remote", "reliable")
+func _r_notice(text: String) -> void:
+	hud.toast(text)
 
 
 @rpc("authority", "call_remote", "reliable")

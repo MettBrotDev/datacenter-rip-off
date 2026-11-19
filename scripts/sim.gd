@@ -45,7 +45,7 @@ var money := Catalog.START_MONEY
 var tokens := 0.0       # tokens per second being produced
 var watts := 0.0        # total load being served
 var capacity := 0.0     # what the running generators could deliver right now
-var profit := 0.0       # $ per second
+var profit := 0.0       # $ per second, set by the world from what the company earns
 var tripped: Dictionary = {}   # circuit id -> true while its breaker is off
 var weather := 0        # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
@@ -313,9 +313,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if it.burning:
 			status[it.id] = status.get(it.id, 0) | 8
 
-	profit = tokens * Catalog.TOKEN_PRICE   # power is paid for in fuel, sweat or weather
-	money += profit * dt
-	return status
+	return status   # tokens are not money: what they turn into is the company's business (company.gd)
 
 
 ## Each loop's coolant warms with the heat going into it and cools through its radiators.

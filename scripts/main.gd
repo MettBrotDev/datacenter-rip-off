@@ -10,6 +10,8 @@ extends Node
 ##   --money=N              host: set the company balance
 ##   --weather=N            host: force the weather (0 sunny, 1 cloudy, 2 rain) and keep it
 ##   --doa                  host: every used part is dead on arrival
+##   --demo                 host: give the company a few hours of history (products, a model, users)
+##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
@@ -33,7 +35,7 @@ func _ready() -> void:
 
 func _setup_input() -> void:
 	var keys := {"fwd": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R, "use": KEY_Q, "coolant": KEY_H}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R, "use": KEY_Q, "coolant": KEY_H, "company": KEY_TAB}
 	for action: String in keys:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = keys[action]
@@ -89,6 +91,11 @@ func _handle_args() -> void:
 		world._sim.weather_left = 1e9
 	if args.has("doa") and world:
 		world.doa_chance = 1.0
+	if args.has("demo") and world:
+		world._company.demo()
+		world._sim_step(0.0)
+	if args.has("company") and world:
+		world.hud.open_company(args["company"] if args["company"] != "" else "overview")
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("selftest"):
@@ -333,6 +340,28 @@ func _selftest() -> void:
 	me.exposure = 0.0
 	me._feel_heat(600.0)
 	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
+
+	# 15a. the company: tokens are not money. Sell some raw, make slop, build a product, train a model.
+	var company: RefCounted = world._company
+	company.tokens = 30000.0
+	var cash: float = sim.money
+	world.request_company("sell", [1000])
+	print("CHECK sold 1000 raw tokens at $%.2f each: got $%d" % [company.spot, sim.money - cash])
+	world.request_company("start", ["slop", "seo", 0, 0])
+	world.request_company("start", ["product", "wrapper", 1, 0])
+	world.request_company("train", [])
+	print("CHECK started slop, a product and training: %d tokens left, %d in the works, training gen %s" % [
+		company.tokens, company.jobs.size(), company.training.get("gen", "-")])
+	world.request_company("start", ["product", "agi", 0, 0])   # refused: wrong stage
+	await _run(200.0)
+	print("CHECK 200 s later: live=%s model gen %d, income $%d/min, stage %s" % [
+		str(company.live.map(func(item: Dictionary) -> String: return "%s $%d/min" % [item["name"], item["peak"] * item["hype"]])),
+		company.model_gen, company.income * 60.0, world.co["stage"]])
+	world.request_company("share", [0.5])
+	world.request_company("advertise", ["ads"])
+	await _run(60.0)
+	print("CHECK platform: users=%d served=%.1f tok/s share=%d%%" % [company.users, company.served, company.share * 100.0])
+	world.request_company("share", [0.0])
 
 	# 15. sensors feed the ops board: nothing is listed until they are installed
 	print("CHECK board with no sensors: %s" % str(world.board.readings(world)))

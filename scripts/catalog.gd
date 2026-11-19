@@ -33,7 +33,6 @@ extends RefCounted
 const Shapes = preload("res://scripts/shapes.gd")
 
 const START_MONEY := 1500.0
-const TOKEN_PRICE := 0.25        # $ earned per token
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
