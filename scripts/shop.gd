@@ -774,6 +774,8 @@ func _warnings(def: Dictionary) -> Array:
 		out.append(["No fans: needs a coolant loop", UI.CYAN])
 	if def.get("fragile", false):
 		out.append(["Ruined by rain and puddles", UI.RED])
+	if def.get("group", "") in ["cpu", "ram", "gpu"]:
+		out.append(["Delicate: do not throw it or step on it", UI.AMBER])
 	if def.get("gen", {}).get("kind", "") == "solar":
 		out.append(["Outdoors only, weather permitting", UI.AMBER])
 	if def.has("max_watts"):
