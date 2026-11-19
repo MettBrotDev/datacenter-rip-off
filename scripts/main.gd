@@ -4,6 +4,7 @@ extends Node
 ## Test flags (after `--` on the command line):
 ##   --host | --join[=ip]   skip the menu
 ##   --name=X               player name
+##   --port=N               UDP port to host or join on (default 24565)
 ##   --bot                  local player walks, grabs and throws on its own
 ##   --yaw=DEG              initial facing of the local player
 ##   --pos=X,Y,Z            initial position of the local player
@@ -82,6 +83,8 @@ func _handle_args() -> void:
 		var xyz: PackedStringArray = args["pos"].split(",")
 		Net.test_pos = Vector3(float(xyz[0]), float(xyz[1]), float(xyz[2]))
 	Net.test_yaw = float(args.get("yaw", "0"))
+	if args.has("port"):
+		Net.port = int(args["port"])
 	if args.has("host"):
 		Net.host()
 	elif args.has("join"):
