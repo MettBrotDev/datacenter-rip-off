@@ -18,6 +18,7 @@ const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3
 const SIM_STEP := 0.5
 const Weather = preload("res://scripts/weather.gd")
 const House = preload("res://scripts/house.gd")
+const Dumpster = preload("res://scripts/dumpster.gd")
 const Town = preload("res://scripts/town.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
 const GARAGE_CIRCUIT := 1000                  # houses use their own id as circuit id
@@ -44,13 +45,18 @@ var tokens := 0.0
 var watts := 0.0
 var tripped := false             # any breaker off
 var tripped_circuits: Array = [] # which ones
-var houses: Dictionary = {}      # house id -> House (0 is our own)
+var houses: Dictionary = {}      # house id -> House (0 is the landlady's, next door)
+var temps: Dictionary = {}       # circuit id -> degrees C inside that building
+var outside_temp := 20.0
+var cables: Cables
+var doa_chance := 0.12           # host: odds that a used part turns out dead when unpacked
 var door_open := false
 var capacity := 0.0             # watts available right now (grid + running generators)
 
 var weather := 0                # index into Catalog.WEATHER
 
 var _garage: Garage
+var _dumpster: Dumpster
 var _weather: Weather
 var _players: Node3D
 var _items: Node3D
@@ -72,6 +78,11 @@ func _ready() -> void:
 	for f: Node3D in fixtures.values():
 		f.circuit = GARAGE_CIRCUIT
 	_build_houses()
+	_dumpster = Dumpster.new()
+	_dumpster.position = Vector3(4.9, 0, 8.2)   # on the grass beside the driveway
+	_dumpster.rotation.y = -PI / 2   # button towards the driveway
+	add_child(_dumpster)
+	fixtures.merge(_dumpster.fixtures)
 	_weather = Weather.new()
 	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
 	add_child(_weather)
@@ -81,7 +92,7 @@ func _ready() -> void:
 	_items = Node3D.new()
 	_items.name = "Items"
 	add_child(_items)
-	var cables := Cables.new()
+	cables = Cables.new()
 	cables.world = self
 	add_child(cables)
 	hud = Hud.new()
@@ -151,6 +162,21 @@ func circuits() -> Dictionary:
 		if h.state != House.NEIGHBOUR:
 			out[h.id] = [Town.CIRCUIT_WATTS[h.lot["size"]], "the old house of %s" % h.lot["name"]]
 	return out
+
+
+## How much faster than a sealed room this building loses heat (open doors, no walls at all).
+func vent_factor(circuit: int) -> float:
+	if circuit == GARAGE_CIRCUIT:
+		return 2.5 if door_open else 1.0
+	var h: House = houses.get(circuit)
+	if h == null:
+		return 1.0
+	return 25.0 if h.state == House.GONE else (2.0 if h.door_open else 1.0)
+
+
+## The temperature a player standing here feels: the building they are in, or the weather.
+func temp_at(pos: Vector3) -> float:
+	return temps.get(circuit_at(pos), outside_temp)
 
 
 ## Which building's wiring a power inlet or wall socket at this spot belongs to; -1 for none.
@@ -227,6 +253,20 @@ func request_breaker(circuit: int) -> void:
 
 func request_door() -> void:
 	_to_host(&"_h_door", [])
+
+
+func request_empty_bin() -> void:
+	_to_host(&"_h_empty_bin", [])
+
+
+## The local player ran into a cable.
+func request_trip(id: int, type: String) -> void:
+	_to_host(&"_h_trip", [id, type])
+
+
+## Spray the held extinguisher at a burning item.
+func request_extinguish(id: int) -> void:
+	_to_host(&"_h_extinguish", [id])
 
 
 ## Switch a generator on/off, or hop on/off the bike.
@@ -472,6 +512,9 @@ func _h_unpack(id: int) -> void:
 	var xf := Transform3D(Basis(Vector3.UP, box.global_rotation.y), box.global_position + Vector3(0, lift, 0))
 	_cast(&"_r_despawn", [id])
 	_spawn(inside, xf)
+	if Catalog.ITEMS[inside].get("used", false) and randf() < doa_chance:
+		items[_next_id - 1].dead = true
+		_cast(&"_r_toast", ["The %s was dead on arrival. No refunds." % Catalog.ITEMS[inside]["label"].to_lower()])
 	_sim_step(0.0)
 
 
@@ -481,6 +524,56 @@ func _h_breaker(circuit: int) -> void:
 		return
 	_sim.reset_breaker(circuit)
 	_cast(&"_r_toast", ["%s reset the breaker in %s" % [name_of(Net.sender()), circuits()[circuit][1]]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_empty_bin() -> void:
+	if not multiplayer.is_server():
+		return
+	var doomed := {}
+	for it: Item in items.values():
+		if it.holder == 0 and it.parent == 0 and _dumpster.holds(it.global_position):
+			doomed[it.id] = true
+	var grew := true
+	while grew:   # whatever is mounted on something in there goes with it
+		grew = false
+		for it: Item in items.values():
+			if it.parent != 0 and doomed.has(it.parent) and not doomed.has(it.id):
+				doomed[it.id] = true
+				grew = true
+	for id: int in doomed:
+		_cast(&"_r_despawn", [id])
+	_cast(&"_r_toast", ["%s emptied the dumpster (%d %s gone for good)" % [
+		name_of(Net.sender()), doomed.size(), "thing" if doomed.size() == 1 else "things"]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_trip(id: int, type: String) -> void:
+	if not multiplayer.is_server() or type not in ["power", "net"]:
+		return
+	var it: Item = items.get(id)
+	var p := player(Net.sender())
+	if it == null or p == null or it.link(type) == 0 or p.position.distance_to(it.global_position) > Catalog.MAX_CABLE + 2.0:
+		return
+	_cast(&"_r_link", [id, type, 0])
+	_cast(&"_r_toast", ["%s tripped over a %s cable and pulled it out of the %s" % [
+		name_of(Net.sender()), "power" if type == "power" else "network", it.label.to_lower()]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_extinguish(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var can := held_by(Net.sender())
+	var target: Item = items.get(id)
+	if can == null or can.kind != "extinguisher" or target == null:
+		return
+	for it: Item in items.values():   # the cloud covers everything close to where you aim
+		if it.burning and it.global_position.distance_to(target.global_position) < 1.5:
+			it.burning = false
 	_sim_step(0.0)
 
 
@@ -636,7 +729,8 @@ func _sim_step(dt: float) -> void:
 	for it: Item in items.values():
 		if it.def.has("gen"):
 			gens[it.id] = [it.running, it.fuel, it.rider, it.load]
-	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather], status, gens])
+	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather,
+		_sim.temps, _sim.outside_temp()], status, gens])
 
 
 ## A pinned item whose support was taken away (the crate under it got picked up...) falls.
@@ -739,6 +833,8 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 	tripped_circuits = company[5]
 	tripped = not tripped_circuits.is_empty()
 	weather = company[6]
+	temps = company[7]
+	outside_temp = company[8]
 	_weather.set_weather(weather)
 	hud.set_weather(weather)
 	for id: int in status:

@@ -66,9 +66,9 @@ func _ready() -> void:
 	bar.alignment = BoxContainer.ALIGNMENT_END
 	bar.add_theme_constant_override("separation", 8)
 	right.add_child(bar)
-	for stat: String in ["WEATHER", "COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
+	for stat: String in ["WEATHER", "HERE", "COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
 		var tile := UI.panel(10)
-		tile.custom_minimum_size.x = 150
+		tile.custom_minimum_size.x = 96 if stat == "HERE" else 150
 		bar.add_child(tile)
 		var tv := VBoxContainer.new()
 		tv.add_theme_constant_override("separation", 0)
@@ -133,6 +133,13 @@ func set_stats(money: float, tokens: float, watts: float, capacity: float, profi
 	_values["BALANCE"].add_theme_color_override("font_color", UI.GREEN if money >= 0.0 else UI.RED)
 	_shop.set_money(money)
 	_offer.refresh()
+
+
+## Temperature where the local player is standing.
+func set_temp(degrees: float) -> void:
+	_values["HERE"].text = "%d °C" % degrees
+	_values["HERE"].add_theme_color_override("font_color",
+			UI.RED if degrees >= 50.0 else (Color(1.0, 0.65, 0.2) if degrees >= 40.0 else UI.TEXT))
 
 
 func set_weather(index: int) -> void:

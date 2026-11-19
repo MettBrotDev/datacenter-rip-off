@@ -38,6 +38,11 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Internet comes from the garage's wall box and from the router in every house we own.
 - Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
+- Heat: every watt used in a building warms it (`sim._heat_step`); open doors, fans and air conditioners
+  cool it. 40 C servers at half speed, 50 C shutdown, 60 C fires start. Fire ruins items after 6 s,
+  spreads to flammable neighbours, is put out with an extinguisher or by rain.
+- Power strips catch fire above 2000 W. Sprinting across a cable pulls it out. Used parts may be dead on arrival.
+- The dumpster beside the driveway (`dumpster.gd`) deletes whatever is inside when its button is pressed.
 - Purchases arrive outside on the driveway as `parcel` items (`Item.contains` = what is inside) and are
   unpacked with Q. Parcels are rainproof.
 - Rain ruins `fragile` items (electronics) that are outdoors for 5 s in total: status bit 2, permanent.
@@ -72,7 +77,7 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 ## Milestones
 1. DONE — walk around together, carry and throw objects
 2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breakers, money, generators, weather, town, buyable houses. Missing: cooling
-3. Chaos: heat, breakers, leaks, network loops, trip-over cables, sketchy used hardware
+3. STARTED — heat, fire, extinguisher, strip overload, tripping, dead-on-arrival parts. Missing: the real cooling system, leaks, network loops
 4. Company layer: products, AI models, shop, progression, bigger locations
 5. Polish: glow, sound, UI, balance
 

@@ -23,6 +23,9 @@ var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the 
 var contains := ""      # parcels: the item kind inside
 var broken := false     # ruined by rain; set through status bit 2 so every peer shows it
 var wet := 0.0          # host only: seconds of rain soaked up so far
+var dead := false       # host only: will be reported as ruined (burnt out, or a dud from the start)
+var burning := false    # host only: on fire; reaches other peers as status bit 3
+var burn := 0.0         # host only: seconds it has been burning
 # generators only (the host simulates these and replicates them twice a second)
 var running := false    # fuel generators: switched on
 var fuel := 0.0         # 0..1 tank level
@@ -32,6 +35,7 @@ var load := 0.0         # watts currently drawn from it
 var _world: Node3D
 var _leds: Array = []
 var _light: OmniLight3D   # lamps only
+var _fire: Node3D         # flames and their glow, while burning
 var _target_pos := Vector3.ZERO
 var _target_rot := Quaternion.IDENTITY
 var _has_target := false
@@ -120,10 +124,63 @@ func set_status(bits: int) -> void:
 	status = bits
 	if bits & 4 and not broken:
 		_ruin()
+	_show_fire(bits & 8 != 0)
+	var power := bits & 3
 	if _light:
-		_light.visible = bits == 3
+		_light.visible = power == 3
 	for mat: StandardMaterial3D in _leds:
-		Catalog.set_light(mat, 2 if bits == 3 else (1 if bits == 1 else 0))
+		Catalog.set_light(mat, 2 if power == 3 else (1 if power == 1 else 0))
+
+
+func on_fire() -> bool:
+	return _fire != null
+
+
+func _show_fire(on: bool) -> void:
+	if on == (_fire != null):
+		return
+	if not on:
+		_fire.queue_free()
+		_fire = null
+		return
+	var size: Vector3 = def["size"]
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.vertex_color_use_as_albedo = true
+	glow.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var puff := SphereMesh.new()
+	puff.radius = 0.11
+	puff.height = 0.22
+	puff.radial_segments = 8
+	puff.rings = 4
+	puff.material = glow
+	var fade := Gradient.new()
+	fade.set_color(0, Color(1.0, 0.9, 0.3, 0.95))
+	fade.set_color(1, Color(0.9, 0.15, 0.0, 0.0))
+	var flames := CPUParticles3D.new()
+	flames.mesh = puff
+	flames.amount = 36
+	flames.lifetime = 0.8
+	flames.local_coords = false
+	flames.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	flames.emission_box_extents = Vector3(size.x, size.y, size.z) * 0.4
+	flames.direction = Vector3.UP
+	flames.spread = 25.0
+	flames.gravity = Vector3(0, 2.5, 0)
+	flames.initial_velocity_min = 0.5
+	flames.initial_velocity_max = 1.4
+	flames.scale_amount_min = 0.6
+	flames.scale_amount_max = 1.6
+	flames.color_ramp = fade
+	var flicker := OmniLight3D.new()
+	flicker.light_color = Color(1.0, 0.5, 0.15)
+	flicker.light_energy = 2.5
+	flicker.omni_range = 5.0
+	flicker.position.y = size.y * 0.5 + 0.3
+	_fire = Node3D.new()
+	_fire.add_child(flames)
+	_fire.add_child(flicker)
+	add_child(_fire)
 
 
 ## Rained on: dead for good. It still exists as scorched junk you can carry around.

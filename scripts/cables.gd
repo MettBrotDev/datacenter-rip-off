@@ -6,7 +6,7 @@ const SEGMENTS := 10
 
 var world: Node3D
 
-var _pool: Dictionary = {}     # key -> {"node": Node3D, "a": Vector3, "b": Vector3}
+var _pool: Dictionary = {}     # key -> {"node", "a", "b", "points": the bends, "link": [item id, type]}
 var _mesh: CylinderMesh
 var _mats: Dictionary = {}
 
@@ -32,6 +32,7 @@ func _process(_dt: float) -> void:
 				var key := "%d%s" % [it.id, type]
 				seen[key] = true
 				_draw(key, type, it.port_pos(type), _socket_pos(target, it.id))
+				_pool[key]["link"] = [it.id, type]
 	if not world.preview.is_empty():
 		var src: Node3D = world.items.get(world.preview["id"])
 		var me: Node3D = world.player(multiplayer.get_unique_id())
@@ -42,6 +43,24 @@ func _process(_dt: float) -> void:
 		if not seen.has(key):
 			_pool[key]["node"].queue_free()
 			_pool.erase(key)
+
+
+## The cable lying across this spot at ankle height, as [item id, type], or [] if there is none.
+func tripped_by(pos: Vector3, reach := 0.28) -> Array:
+	var foot := Vector2(pos.x, pos.z)
+	for entry: Dictionary in _pool.values():
+		if not entry.has("link"):
+			continue
+		var points: Array = entry["points"]
+		for i in points.size() - 1:
+			var p: Vector3 = points[i]
+			var q: Vector3 = points[i + 1]
+			if minf(p.y, q.y) > pos.y + 0.3:
+				continue   # hanging above the feet
+			var closest := Geometry2D.get_closest_point_to_segment(foot, Vector2(p.x, p.z), Vector2(q.x, q.z))
+			if closest.distance_to(foot) < reach:
+				return entry["link"]
+	return []
 
 
 ## Spread plugs a little so several cables into one provider do not overlap exactly.
@@ -60,7 +79,7 @@ func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
 			seg.mesh = _mesh
 			seg.material_override = _mats[type]
 			node.add_child(seg)
-		entry = {"node": node, "a": Vector3.INF, "b": Vector3.INF}
+		entry = {"node": node, "a": Vector3.INF, "b": Vector3.INF, "points": []}
 		_pool[key] = entry
 	if entry["a"].is_equal_approx(a) and entry["b"].is_equal_approx(b):
 		return
@@ -70,6 +89,8 @@ func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
 	var sag := 0.2 + a.distance_to(b) * 0.15
 	var low := minf(0.02, minf(a.y, b.y))
 	var prev := a
+	var points := [a]
+	entry["points"] = points
 	for i in SEGMENTS:
 		var t := float(i + 1) / SEGMENTS
 		var p := a.lerp(b, t)
@@ -84,6 +105,7 @@ func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
 		var seg: MeshInstance3D = entry["node"].get_child(i)
 		seg.transform = Transform3D(Basis(x * radius, y * length, x.cross(y) * radius), (prev + p) * 0.5)
 		prev = p
+		points.append(p)
 
 
 func _mat(color: Color) -> StandardMaterial3D:

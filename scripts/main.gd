@@ -9,6 +9,7 @@ extends Node
 ##   --pos=X,Y,Z            initial position of the local player
 ##   --money=N              host: set the company balance
 ##   --weather=N            host: force the weather (0 sunny, 1 cloudy, 2 rain) and keep it
+##   --doa                  host: every used part is dead on arrival
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
@@ -86,6 +87,8 @@ func _handle_args() -> void:
 	if args.has("weather") and world:
 		world._sim.weather = int(args["weather"])
 		world._sim.weather_left = 1e9
+	if args.has("doa") and world:
+		world.doa_chance = 1.0
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("selftest"):
@@ -206,6 +209,55 @@ func _selftest() -> void:
 		if it.broken:
 			ruined.append(it.kind)
 	print("CHECK after 7 s outdoors: ruined=%s parcels still closed=%d" % [ruined, _count("parcel")])
+
+
+	# 8. heat: the garage settles a few degrees above outside; force it hot and watch the servers
+	var sim: RefCounted = world._sim
+	var garage: int = world.GARAGE_CIRCUIT
+	_check("at %d °C in the garage (outside %d °C)" % [sim.temps[garage], sim.outside_temp()])
+	sim.temps[garage] = 45.0
+	_check("garage forced to 45 °C: half speed")
+	sim.temps[garage] = 55.0
+	_check("garage forced to 55 °C: thermal shutdown")
+	sim.temps[garage] = 30.0
+	_check("garage back to 30 °C")
+
+	# 9. fire: set the server alight, put it out with an extinguisher
+	await _buy(["extinguisher"])
+	world.request_grab(_by_kind()["extinguisher"].id)
+	sim.ignite(server)
+	world._sim_step(0.0)
+	me.position = Vector3(2.5, 0, 0)
+	print("CHECK server on fire: flames=%s" % server.on_fire())
+	world.request_extinguish(server.id)
+	print("CHECK after the extinguisher: flames=%s ruined=%s" % [server.on_fire(), server.broken])
+
+	# 10. running over the power strip's cable pulls it out
+	world.request_release(false)
+	me.position = strip.global_position + Vector3(0, 0, 1)
+	world.request_trip(strip.id, "power")
+	_check("tripped over the strip's cable (plugged into %d)" % strip.power_to)
+
+	# 11. dumpster: put the two starter crates in, press the button
+	var before := _count("crate")
+	for it: Node3D in world.items.values().duplicate():
+		if it.kind == "crate":
+			me.position = it.global_position + Vector3(0, 0, 1)
+			world.request_grab(it.id)
+			me.position = Vector3(4.9, 0, 6.5)
+			world.request_place(Transform3D(Basis(), Vector3(4.9, 0.5, 8.2 + (it.id % 2) * 0.6 - 0.3)))
+	await _wait(0.3)
+	world.request_empty_bin()
+	print("CHECK dumpster: crates %d -> %d" % [before, _count("crate")])
+
+	# 12. a used GPU: dead on arrival only when the run was started with --doa
+	await _buy(["gpu_1080"])
+	await _wait(0.3)
+	var newest: Node3D = null
+	for it: Node3D in world.items.values():
+		if it.kind == "gpu_1080" and (newest == null or it.id > newest.id):
+			newest = it
+	print("CHECK newly unpacked used GPU: ruined=%s" % newest.broken)
 
 
 ## Buys things, then walks to the driveway and unpacks every parcel there.

@@ -28,6 +28,8 @@ var _send_t := 0.0
 var _bot_t := 0.0
 var _last_pos := Vector3.ZERO
 var _spawn := Vector3.ZERO
+var _stumble := 0.0           # seconds left without control after tripping
+var _trip_wait := 0.0         # seconds until we can trip again
 var _ghost: MeshInstance3D    # preview of where the held item would be placed
 var _place_xf: Variant = null # Transform3D of that spot, or null when there is none
 var _place_turns := 0         # extra quarter turns chosen with R
@@ -173,11 +175,22 @@ func _move(dt: float) -> void:
 	if Net.bot:
 		_bot(dt)
 		dir = -transform.basis.z
-	elif active:
+	elif active and _stumble <= 0.0:
 		var i := Input.get_vector("left", "right", "fwd", "back")
 		dir = (transform.basis * Vector3(i.x, 0, i.y)).normalized()
 		if Input.is_action_pressed("sprint"):
 			speed = SPRINT
+	# Running across a cable on the floor yanks it out. Walking is always safe.
+	_stumble -= dt
+	_trip_wait -= dt
+	if _trip_wait <= 0.0 and is_on_floor() and Vector2(velocity.x, velocity.z).length() > WALK + 0.8:
+		var cable: Array = _world.cables.tripped_by(position)
+		if not cable.is_empty():
+			_world.request_trip(cable[0], cable[1])
+			_trip_wait = 1.5
+			_stumble = 0.45
+			velocity *= 0.15
+			head.rotation.x = maxf(head.rotation.x - 0.6, -1.4)   # face first
 	var accel := (40.0 if is_on_floor() else 8.0) * dt
 	velocity.x = move_toward(velocity.x, dir.x * speed, accel)
 	velocity.z = move_toward(velocity.z, dir.z * speed, accel)
@@ -248,8 +261,13 @@ func _update_actions() -> void:
 				acts.append(["rotate", "[R] Rotate", _rotate])
 			else:
 				acts.append(["interact", "[E] Drop", _world.request_release.bind(false)])
-		acts.append(["throw", "[Click] Throw", _world.request_release.bind(true)])
+		if held.kind == "extinguisher" and t is RigidBody3D and t.on_fire():
+			acts.append(["throw", "[Click] Put out the fire", _world.request_extinguish.bind(t.id)])
+		else:
+			acts.append(["throw", "[Click] Throw", _world.request_release.bind(true)])
 	elif t is RigidBody3D:
+		if t.on_fire():
+			acts.append(["", "ON FIRE. Get a fire extinguisher!", Callable()])
 		acts.append(["interact", "[E] %s %s" % ["Pull out" if t.parent != 0 else "Pick up", t.label.to_lower()],
 				_world.request_grab.bind(t.id)])
 		for type: String in ["power", "net"]:
@@ -291,6 +309,8 @@ func _update_actions() -> void:
 							_world.request_house_door.bind(t.house)])
 			"deed":
 				acts.append(["interact", "[E] Demolish this house (press twice)", _world.request_demolish.bind(t.house)])
+			"bin":
+				acts.append(["interact", "[E] Empty the dumpster. Everything in it is gone for good.", _world.request_empty_bin])
 			"door":
 				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
 						_world.request_door])
@@ -307,6 +327,7 @@ func _update_actions() -> void:
 	for act: Array in acts:
 		lines.append(act[1])
 	_world.hud.set_prompt("\n".join(lines))
+	_world.hud.set_temp(_world.temp_at(position))
 	_ghost.visible = _place_xf != null
 	if _place_xf != null:
 		(_ghost.mesh as BoxMesh).size = held.def["size"]
