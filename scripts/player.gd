@@ -330,7 +330,7 @@ func _update_actions() -> void:
 		if not pins.is_empty():
 			acts.append(["use", "[Q] Take the last pin up (%d)" % pins.size(), _unpin])
 		acts.append([type, "[%s] Put the end down" % KEYS[type], _put_down])
-		acts.append(["rotate", "[R] Roll the %s up (it is gone then)" % WORDS[type], _set_cable.bind({})])
+		acts.append(["rotate", "[R] Roll the %s up (it is gone then)" % WORDS[type], _roll_up])
 	elif held:
 		if held.kind == "fuel" and t is RigidBody3D and t.def.get("gen", {}).get("kind", "") == "fuel":
 			acts.append(["interact", "[E] Refuel %s (%d%% full)" % [t.label.to_lower(), t.fuel * 100.0],
@@ -576,7 +576,14 @@ func _generator_actions(t: Node3D, acts: Array) -> void:
 				acts.append(["", "%s: %d / %d W" % [state["name"], t.load, gen["watts"] * state["solar"]], Callable()])
 
 
+func _roll_up() -> void:
+	Sound.at("cable_roll", global_position + Vector3(0, 0.8, 0))
+	_set_cable({})
+
+
 func _set_cable(cable: Dictionary) -> void:
+	if not cable.is_empty() and cable["pins"].is_empty() and float(cable["paid"]) == 0.0:
+		Sound.at("cable_pull", global_position + Vector3(0, 0.9, 0))   # a new cable comes off the reel
 	_cable = cable
 	_world.preview = cable
 
@@ -611,6 +618,7 @@ func _pin_spot() -> Variant:
 
 
 func _pin(spot: Vector3) -> void:
+	Sound.at("pin_click", spot)
 	_cable["pins"].append(spot)
 
 

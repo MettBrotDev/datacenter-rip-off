@@ -279,8 +279,10 @@ func animate(dt: float, st: Dictionary) -> void:
 	if is_air and not _was_air:
 		_kick("crouch", -3.0 if vy > 1.0 else 0.0)
 		_kick("ax", 1.2)
+		Sound.jump(self, vy)
 	elif _was_air and not is_air:
 		var hit := clampf(-_vy_prev * 0.8, 1.5, 7.0)
+		Sound.land(self, hit)
 		_kick("crouch", hit)
 		_kick("ax", -hit * 0.35)
 	_was_air = is_air
@@ -318,6 +320,7 @@ func animate(dt: float, st: Dictionary) -> void:
 	if _spd > 0.15 and not is_air:
 		_phase += TAU * cadence * dt
 	var ph := _phase
+	Sound.foot(self, ph, _spd, is_air, w_suit, heavy)
 	var wad := sin(ph)
 	var effort := ride if riding else 0.0
 	_pedal += TAU * (0.9 + 1.7 * effort) * dt * w_ride
