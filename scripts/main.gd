@@ -11,7 +11,8 @@ extends Node
 ##   --money=N              host: set the company balance
 ##   --weather=N            host: force the weather (0 sunny, 1 cloudy, 2 rain) and keep it
 ##   --doa                  host: every used part is dead on arrival
-##   --demo                 host: give the company a few hours of history (products, a model, users)
+##   --demo[=starved]       host: give the company a few hours of history (products, a model, users, 300 tok/s);
+##                          "starved" adds a product the servers cannot keep up with
 ##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
 ##   --shop                 open the parts market
 ##   --used                 open the parts market on its second-hand side
@@ -31,6 +32,7 @@ const Menu = preload("res://scripts/menu.gd")
 const PoseStage = preload("res://scripts/pose_stage.gd")
 const UsedMarket = preload("res://scripts/used_market.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const Company = preload("res://scripts/company.gd")
 
 var world: Node3D
 var menu: Control
@@ -107,7 +109,7 @@ func _handle_args() -> void:
 	if args.has("doa") and world:
 		world.doa_chance = 1.0
 	if args.has("demo") and world:
-		world._company.demo()
+		world._company.demo(args["demo"] == "starved")
 		world._sim_step(0.0)
 	if args.has("company") and world:
 		world.hud.open_company(args["company"] if args["company"] != "" else "overview")
@@ -398,39 +400,123 @@ func _selftest() -> void:
 	me._feel_heat(600.0)
 	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
 
-	# 15a. the company: tokens are not money. Sell some raw, make slop, then the model ladder.
+	# 15a. the company: tokens per second are a live stream. Use it, serve with it, rent it out, or waste it.
 	var company: RefCounted = world._company
-	company.earned = 30000.0     # a Seed-round company: 180k tokens of storage
-	company.tokens = 170000.0
-	var cash: float = sim.money
-	world.request_company("sell", [1000])
-	print("CHECK sold 1000 raw tokens at $%.2f each: got $%d" % [company.spot, sim.money - cash])
+	company.earned = 30000.0     # a Seed-round company: 5 slots, rental x1.5
+	company._event_left = 1.0e9   # no random events while we measure
+	company.live.clear()
+	company.jobs.clear()
+	#      nothing to do: the stream is rented out for pennies, or wasted when the switch is off
+	_co_run(10.0, 3.5)
+	var flow: Dictionary = world.co["flow"]
+	print("CHECK idle at 3.5 tok/s, renting: serving %.1f, jobs %.1f, rented %.1f, wasted %.1f, rent pays=%s" % [
+		flow["serving"], flow["jobs"], flow["rented"], flow["wasted"], world.co["rental"]["income"] > 0.0])
+	world.request_company("rent", [false])
+	_co_run(2.0, 3.5)
+	flow = world.co["flow"]
+	print("CHECK rental switched off: rented %.1f, wasted %.1f (%d%% of the compute), rent pays=%s" % [
+		flow["rented"], flow["wasted"], roundi(flow["wasted"] / flow["total"] * 100.0), world.co["rental"]["income"] > 0.0])
+	world.request_company("rent", [true])
+	#      slop: 120 tokens of work, finished by the stream
 	world.request_company("start", ["slop", "seo", 0, 0])
+	_co_run(1.0, 3.5)
+	var job: Dictionary = company.jobs[0]
+	print("CHECK slop job: %d tokens of work, %.1f tok/s, ETA %d s, rented %.1f" % [job["total"], job["rate"], roundi(job["eta"]), world.co["flow"]["rented"]])
+	_co_run(40.0, 3.5)
+	print("CHECK slop done after 41 s at 3.5 tok/s: jobs %d, live %s" % [company.jobs.size(), str(company.live.map(func(it: Dictionary) -> String: return it["name"]))])
+	var made: float = company.live[0]["earned"]
+	_co_run(30.0, 3.5)
+	print("CHECK slop pays out: earned more=%s, peak $%d/min" % [company.live[0]["earned"] > made, company.live[0]["peak"]])
+	#      no compute: the job waits, it does not fail
+	world.request_company("start", ["slop", "linkedin", 0, 0])
+	_co_run(20.0, 0.0)
+	job = company.jobs[0]
+	print("CHECK no compute for 20 s: job still there=%s, %d of %d tokens done, stalled=%s" % [company.jobs.size() == 1, job["total"] - job["left"], job["total"], job["eta"] < 0.0])
+	_co_run(70.0, 3.5)
+	print("CHECK compute is back: job finished=%s, live %d" % [company.jobs.is_empty(), company.live.size()])
+	#      rushing with money
+	world.request_company("start", ["slop", "recipes", 0, 0])
+	var cash0: float = sim.money
+	_co_run(1.0, 0.0)
+	var price: float = Company.rush_price(company.jobs[0])
+	world.request_company("rush", [company.jobs[0]["id"]])
+	print("CHECK rush with no compute: price $%d, job finished=%s, money -$%d" % [price, company.jobs.is_empty(), cash0 - sim.money])
+	#      two jobs share equally; priority takes everything it can use
+	company.live.clear()
+	world.request_company("start", ["slop", "recipes", 0, 0])
+	world.request_company("start", ["slop", "linkedin", 0, 0])
+	var job_a: Dictionary = company.jobs[0]
+	var job_b: Dictionary = company.jobs[1]
+	_co_run(1.0, 10.0)
+	print("CHECK two jobs at 10 tok/s: %.1f and %.1f tok/s" % [job_a["rate"], job_b["rate"]])
+	world.request_company("priority", [job_b["id"]])
+	_co_run(1.0, 10.0)
+	print("CHECK priority on the second: %.1f and %.1f tok/s" % [job_a["rate"], job_b["rate"]])
+	world.request_company("priority", [job_b["id"]])
+	_co_run(1.0, 10.0)
+	print("CHECK priority switched off again: %.1f and %.1f tok/s" % [job_a["rate"], job_b["rate"]])
+	world.request_company("cancel", [job_a["id"]])
+	world.request_company("cancel", [job_b["id"]])
+	print("CHECK cancelled both: jobs %d" % company.jobs.size())
+	#      a live product needs serving: starve it and it earns proportionally less
+	world.request_company("rent", [false])
+	company.live.append(company._live("product", "wrapper", "Test wrapper", 0, 2100.0, 1.0, 0.0, 0.0))
+	var item: Dictionary = company.live[0]
+	_co_run(1.0, 12.0)
+	var full: float = world.co["income"]
+	_co_run(1.0, 6.0)
+	var half: float = world.co["income"]
+	print("CHECK product needs %.0f tok/s: income $%d/min fed, $%d/min with half the compute (%d%%), fed %d%%" % [
+		item["demand"], roundi(full / 10.0) * 10, roundi(half / 10.0) * 10, roundi(half / full * 100.0), roundi(item["fed"] * 100.0)])
+	var age0: float = item["age"]
+	_co_run(100.0, 6.0)
+	print("CHECK starved for 100 s: aged %d s in 100 s (rots faster=%s), starved for %d s" % [item["age"] - age0, item["age"] - age0 > 120.0, item["starved"]])
+	_co_run(1.0, 40.0)
+	flow = world.co["flow"]
+	print("CHECK 40 tok/s, a product serving 12, rental off: serving %.1f, wasted %.1f (%d%%)" % [flow["serving"], flow["wasted"], roundi(flow["wasted"] / flow["total"] * 100.0)])
+	world.request_company("rent", [true])
+	_co_run(1.0, 40.0)
+	flow = world.co["flow"]
+	print("CHECK rental back on: rented %.1f, wasted %.1f" % [flow["rented"], flow["wasted"]])
+	#      updating is a job like any other and costs no slot
+	item["hype"] = 0.4
+	item["age"] = item["half_life"] * 1.32
+	world.request_company("update", [item["id"]])
+	var queued: int = company.jobs.size()
+	_co_run(1.0, 400.0)
+	print("CHECK update job queued=%d (slots used %d), rate %.0f tok/s" % [queued, company.slots_used(), company.jobs[0]["rate"] if not company.jobs.is_empty() else 0.0])
+	_co_run(30.0, 400.0)
+	print("CHECK update finished: jobs %d, hype %d%%" % [company.jobs.size(), roundi(item["hype"] * 100.0)])
+	#      the model ladder: too dumb for a product, then the model writes the training stack and trains the next one
 	print("CHECK a product with the starter model: %s" % company.start("product", "wrapper", 0, 0))
 	print("CHECK training with no code written: %s" % company.train())
 	world.request_company("use", ["llama"])   # rented by the minute from here on
 	world._sim_step(0.5)
-	print("CHECK renting %s; running costs per minute: %s" % [world.co["model"]["name"], str(world.co["costs"])])
+	print("CHECK renting %s; running costs per minute: %s" % [world.co["model"]["name"], str(world.co["costs"].keys())])
 	#      the model writes the five parts of the training stack (each attempt can fail)
 	for part: String in company.stack:
-		for attempt in 6:
+		for attempt in 8:
 			if company.stack[part] < 1:
 				world.request_company("code", [part])
-				await _run(32.0)
+				_co_run(10.0, 50.0)
 	print("CHECK training stack after the model wrote it: %s" % str(company.stack))
 	print("CHECK level 2 code with a smartness-1 model: %s" % company.code("data"))
 	var plan: Dictionary = world.co["plan"]
-	print("CHECK the model this stack would train: smartness %d, productivity x%.2f, reliability %d%%, %d tokens" % [
+	print("CHECK the model this stack would train: smartness %d, productivity x%.2f, reliability %d%%, %d tokens of work" % [
 		plan["smart"], plan["productivity"], plan["reliability"] * 100.0, plan["tokens"]])
-	for attempt in 4:
+	world.request_company("train", [])
+	_co_run(30.0, 500.0)
+	for attempt in 12:
 		if company.own.is_empty():
-			company.tokens = 170000.0
-			world.request_company("train", [])
-			await _run(plan["time"] + 2.0)
-	print("CHECK after training: using %s, owned %s, costs %s" % [world.co["model"]["name"], str(company.owned), str(world.co["costs"])])
+			_co_run(30.0, 500.0)
+	world._sim_step(0.5)
+	print("CHECK after training: using %s, owned %s, costs %s" % [world.co["model"]["name"], str(company.owned), str(world.co["costs"].keys())])
 	print("CHECK live now: %s, stage %s" % [
-		str(company.live.map(func(item: Dictionary) -> String: return "%s $%d/min" % [item["name"], item["peak"] * item["hype"]])),
+		str(company.live.map(func(it: Dictionary) -> String: return "%s $%d/min" % [it["name"], it["peak"] * it["hype"]])),
 		world.co["stage"]])
+	company.test_tps = -1.0
+	company.live.clear()
+	await _run(360.0)   # the lab used to take this long in real sim time: keeps the heat and fuel of later stages comparable
 	#      going broke: the landlady pulls the plug
 	var saved: float = sim.money
 	sim.money = -50.0
@@ -443,6 +529,9 @@ func _selftest() -> void:
 	world.hud.open_company()
 	world._sim_step(0.5)
 	var typing: Array = world.co["console"]
+	for tab: String in ["slop", "products", "lab", "platform", "market", "overview"]:
+		world.hud._company._go(tab)
+	print("CHECK company menu refreshed on every tab: %s" % world.hud._company._tab)
 	world.hud._close_overlays()
 	world._sim_step(0.5)
 	print("CHECK console fixture=%s, at the console: %s, after closing: %s" % [world.fixtures.has(-20), str(typing), str(world.co["console"])])
@@ -533,6 +622,18 @@ func _selftest() -> void:
 
 
 ## Lets simulated time pass quickly: `seconds` of game time in half-second steps.
+## Run the company alone (no power, no heat, no running costs: only what the compute earns) for `seconds`
+## with the servers making exactly `tps` tokens per second, then publish its state as world.co.
+func _co_run(seconds: float, tps: float) -> void:
+	var company: RefCounted = world._company
+	company.test_tps = tps
+	for i in int(round(seconds)):
+		var events: Array = []
+		world._sim.money += company.tick(1.0, 0.0, world._sim.money, 0, false, events)
+		world._announce(events)
+	world.co = company.state()
+
+
 func _run(seconds: float) -> void:
 	for i in int(seconds * 2.0):
 		world._sim_step(0.5)

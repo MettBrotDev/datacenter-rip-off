@@ -56,7 +56,7 @@ func _ready() -> void:
 	var tiles := HBoxContainer.new()
 	tiles.add_theme_constant_override("separation", 14)
 	v.add_child(tiles)
-	for stat: String in ["TOKENS", "BALANCE", "POWER", "NET PROFIT"]:
+	for stat: String in ["COMPUTE", "BALANCE", "POWER", "NET PROFIT"]:
 		var tile := UI.panel(16)
 		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tiles.add_child(tile)
@@ -93,15 +93,27 @@ func refresh(world: Node3D) -> void:
 	_weather.text = "%s, %d °C outside" % [state["name"], world.outside_temp]
 	var typing: Array = world.co.get("console", [])
 	_typing.text = "" if typing.is_empty() else "%s %s typing      " % [", ".join(typing), "is" if typing.size() == 1 else "are"]
-	var stored: String = ""
+	var compute := "%.0f tok/s" % world.tokens
+	var used := ""
+	var used_color: Color = UI.TEXT
 	var earners: Array[String] = []
 	if not world.co.is_empty():
-		stored = "%s stored" % UI.num(world.co["tokens"])
+		var flow: Dictionary = world.co["flow"]
+		compute = "%.0f tok/s" % flow["total"]
+		var wasted := roundi(float(flow["wasted"]) / maxf(float(flow["total"]), 0.001) * 100.0)
+		if float(flow["total"]) <= 0.0:
+			used = "nothing running"
+		elif wasted <= 0:
+			used = "all in use"
+		else:
+			used = "%d%% used, %d%% wasted" % [100 - wasted, wasted]
+			used_color = UI.AMBER if wasted < 40 else UI.RED
 		var live: Array = (world.co["live"] as Array).duplicate()
 		live.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["peak"] * a["hype"] > b["peak"] * b["hype"])
 		for item: Dictionary in live.slice(0, 4):
 			earners.append("%s  %s/min" % [str(item["name"]).split(" (")[0], UI.money(float(item["peak"]) * float(item["hype"]))])
-	_tile("TOKENS", "%.0f /s" % world.tokens, stored, UI.TEXT)
+	_tile("COMPUTE", compute, used, UI.TEXT)
+	_values["COMPUTE"][1].add_theme_color_override("font_color", used_color if used_color != UI.TEXT else UI.DIM)
 	_tile("BALANCE", UI.money(world.money), "", UI.GREEN if world.money >= 0.0 else UI.RED)
 	var short: bool = world.watts > world.capacity or world.tripped
 	_tile("POWER", "%d W" % world.watts, "of %d W available" % world.capacity, UI.RED if short else UI.TEXT)

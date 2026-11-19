@@ -1,5 +1,5 @@
 extends Control
-## The company menu (Tab): everything the company can do with its tokens.
+## The company menu: everything the company can do with its compute (a live stream of tokens per second, never stored).
 ## Each tab is built once; `refresh()` (twice a second) only updates texts, values and bars in place.
 ## Rows for jobs and live things are added and removed only when the set of ids changes.
 ## All actions go through world.request_company(action, args).
@@ -14,13 +14,15 @@ var world: Node3D
 
 const TABS: Array = [
 	["overview", "Overview", "dashboard"], ["slop", "Slop", "auto_awesome"], ["products", "Products", "widgets"],
-	["lab", "Model Lab", "science"], ["platform", "Platform", "dns"], ["market", "Market", "show_chart"],
+	["lab", "Model Lab", "science"], ["platform", "Platform", "dns"], ["market", "Compute", "show_chart"],
 ]
 const SLOP_ICONS := {"seo": "article", "linkedin": "work", "recipes": "restaurant", "hands": "back_hand",
 	"ebooks": "menu_book", "lofi": "headphones", "reviews": "star", "podcast": "podcasts", "news": "newspaper"}
 const PRODUCT_ICONS := {"wrapper": "memory", "resume": "description", "horoscope": "stars", "girlfriend": "favorite",
 	"copilot": "code", "legal": "gavel", "crypto": "currency_bitcoin", "agi": "psychology"}
 const FAIL_CHANCE := 15
+const FLOW_KEYS: Array = ["serving", "jobs", "rented", "wasted"]
+const FLOW_NAMES := {"serving": "Serving live products", "jobs": "Working on jobs", "rented": "Rented out", "wasted": "Wasted"}
 
 var _tab := "overview"
 var _tab_buttons: Dictionary = {}
@@ -40,8 +42,6 @@ var _attn_rows: Array = []
 var _p_what := "wrapper"
 var _p_size := 0
 var _p_risk := 0
-var _share_hold := 0
-var _dragging := false
 
 
 func _ready() -> void:
@@ -72,7 +72,7 @@ func _ready() -> void:
 	var ar := _hbox(12)
 	_alert.add_child(ar)
 	ar.add_child(UI.chip("warning", UI.RED, 34))
-	ar.add_child(_grow(UI.wrap(UI.bold("Your account is below zero. The landlady has cut the garage internet until you pay up. Sell tokens or retire things that cost money.", 16))))
+	ar.add_child(_grow(UI.wrap(UI.bold("Your account is below zero. The landlady has cut the garage internet until you pay up. Rent out spare compute or retire things that cost money.", 16))))
 	_alert.hide()
 	v.add_child(_alert)
 	_scroll = UI.scroll()
@@ -198,7 +198,71 @@ func _stage_name(level: int) -> String:
 
 func _free_slots() -> int:
 	var co := _co()
-	return int(co["slots"]) - (co["jobs"] as Array).size() - (co["live"] as Array).size()
+	return int(co["slots"]) - _slots_used(co)
+
+
+## Jobs that hold a slot (updates are chores on something already live) plus everything live.
+func _slots_used(co: Dictionary) -> int:
+	var n: int = (co["live"] as Array).size()
+	for job: Dictionary in co["jobs"]:
+		if job["kind"] != "update":
+			n += 1
+	return n
+
+
+## Tokens per second: one decimal while small.
+func _tps(v: float) -> String:
+	return "%.1f" % v if v < 10.0 else UI.short(v)
+
+
+func _flow_color(key: String) -> Color:
+	match key:
+		"serving": return UI.CYAN
+		"jobs": return UI.PURPLE
+		"rented": return UI.GREEN
+	return Color(0.85, 0.3, 0.36)
+
+
+## A thin stacked bar: serving / jobs / rented / wasted. Returns {root, segs}.
+func _flow_bar(height := 8) -> Dictionary:
+	var trough := PanelContainer.new()
+	trough.add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, height / 2, UI.BORDER.darkened(0.35), 0))
+	trough.custom_minimum_size.y = height
+	trough.size_flags_horizontal = SIZE_EXPAND_FILL
+	trough.size_flags_vertical = SIZE_SHRINK_CENTER
+	trough.clip_contents = true
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 0)
+	trough.add_child(h)
+	var segs := {}
+	for key: String in FLOW_KEYS:
+		var r := ColorRect.new()
+		r.color = _flow_color(key)
+		r.size_flags_horizontal = SIZE_EXPAND_FILL
+		r.custom_minimum_size.y = height
+		h.add_child(r)
+		segs[key] = r
+	return {"root": trough, "segs": segs}
+
+
+func _flow_set(bar: Dictionary, flow: Dictionary) -> void:
+	var total: float = flow["total"]
+	for key: String in FLOW_KEYS:
+		var seg: ColorRect = bar["segs"][key]
+		var v: float = flow[key]
+		seg.visible = total > 0.0 and v > total * 0.002
+		seg.size_flags_stretch_ratio = maxf(v, 0.0001)
+
+
+## "71% used, 29% wasted" / "all in use" / "nothing running".
+func _use_text(flow: Dictionary) -> String:
+	var total: float = flow["total"]
+	if total <= 0.0:
+		return "no compute yet"
+	var wasted := roundi(float(flow["wasted"]) / total * 100.0)
+	if wasted <= 0:
+		return "all in use"
+	return "%d%% used, %d%% wasted" % [100 - wasted, wasted]
 
 
 func _hype_color(hype: float) -> Color:
@@ -275,31 +339,28 @@ func _build_header() -> Control:
 
 func _build_strip() -> Control:
 	var row := _hbox(12)
-	_strip["tokens"] = UI.tile("Tokens stored", "memory", UI.PURPLE, 12)
+	_strip["tokens"] = UI.tile("Compute", "memory", UI.PURPLE, 12)
 	_strip["money"] = UI.tile("Balance", "payments", UI.GREEN, 12)
 	_strip["income"] = UI.tile("Net per minute", "trending_up", UI.GREEN, 12)
 	_strip["stage"] = UI.tile("Funding stage", "emoji_events", UI.AMBER, 12)
 	_strip["slots"] = UI.tile("Free slots", "view_in_ar", UI.CYAN, 12)
 	for k: String in ["tokens", "money", "income", "stage", "slots"]:
 		row.add_child(_strip[k]["root"])
-	_strip["tokens_bar"] = UI.bar(0.0, UI.PURPLE, 6)
-	_strip["tokens"]["col"].add_child(_strip["tokens_bar"])
+	_strip["flow"] = _flow_bar(7)
+	_strip["tokens"]["col"].add_child(_strip["flow"]["root"])
 	_strip["stage_bar"] = UI.bar(0.0, UI.AMBER, 6)
 	_strip["stage"]["col"].add_child(_strip["stage_bar"])
 	_grow(_strip["stage"]["root"], 1.25)
-	_grow(_strip["tokens"]["root"], 1.25)
+	_grow(_strip["tokens"]["root"], 1.35)
 	return row
 
 
 func _upd_strip() -> void:
 	var co := _co()
-	var tokens: float = co["tokens"]
-	var storage: float = co["storage"]
-	var fill := tokens / maxf(storage, 1.0)
-	_strip["tokens"]["value"].text = "%s / %s" % [UI.short(tokens), UI.short(storage)]
-	_strip["tokens"]["sub"].text = "+%s tok/s from the servers" % UI.short(co["rate"])
-	(_strip["tokens_bar"] as ProgressBar).value = fill
-	UI.bar_color(_strip["tokens_bar"], UI.RED if fill >= 0.98 else (UI.AMBER if fill >= 0.85 else UI.PURPLE))
+	var flow: Dictionary = co["flow"]
+	_strip["tokens"]["value"].text = "%s tok/s" % _tps(co["rate"])
+	_strip["tokens"]["sub"].text = _use_text(flow)
+	_flow_set(_strip["flow"], flow)
 	_strip["money"]["value"].text = UI.cash(world.money)
 	_strip["money"]["value"].add_theme_color_override("font_color", UI.GREEN if world.money >= 0.0 else UI.RED)
 	_strip["money"]["sub"].text = "cash on hand"
@@ -318,7 +379,7 @@ func _upd_strip() -> void:
 	_strip["stage"]["sub"].text = "Top of the ladder" if maxed else "%s of %s earned" % [UI.cash(co["earned"]), UI.cash(next_at)]
 	var free := _free_slots()
 	_strip["slots"]["value"].text = "%d of %d" % [free, co["slots"]]
-	_strip["slots"]["sub"].text = "%d building, %d live" % [(co["jobs"] as Array).size(), (co["live"] as Array).size()]
+	_strip["slots"]["sub"].text = "%d building, %d live" % [_slots_used(co) - (co["live"] as Array).size(), (co["live"] as Array).size()]
 
 
 # --- rows shared by several tabs ----------------------------------------------------------------
@@ -329,19 +390,25 @@ func _make_job_row(id: int, full: bool) -> Dictionary:
 	root.add_child(v)
 	var top := _hbox(8)
 	v.add_child(top)
-	var row := {"root": root, "name": _name_label(), "eta": UI.bold("", 15, UI.AMBER)}
+	var row := {"root": root, "name": _name_label(), "eta": UI.bold("", 15, UI.AMBER), "prio_on": false}
 	top.add_child(row["name"])
 	row["tag"] = UI.pill("", UI.DIM)
 	top.add_child(row["tag"])
 	top.add_child(row["eta"])
 	row["bar"] = UI.bar(0.0, UI.AMBER, 8)
 	v.add_child(row["bar"])
+	var bottom := _hbox(8)
+	v.add_child(bottom)
+	row["info"] = UI.caption("")
+	row["info"].size_flags_horizontal = SIZE_EXPAND_FILL
+	row["info"].text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	row["info"].clip_text = true
+	bottom.add_child(row["info"])
+	row["prio"] = UI.btn("%s  Priority" % UI.ic("flag"), "ghost", 14)
+	row["prio"].tooltip_text = "Feed this one first. Everything else shares what it leaves."
+	row["prio"].pressed.connect(func() -> void: world.request_company("priority", [id]))
+	bottom.add_child(row["prio"])
 	if full:
-		var bottom := _hbox(8)
-		v.add_child(bottom)
-		row["info"] = UI.caption("")
-		row["info"].size_flags_horizontal = SIZE_EXPAND_FILL
-		bottom.add_child(row["info"])
 		row["rush"] = UI.btn("Rush", "success", 14)
 		row["rush"].pressed.connect(func() -> void: world.request_company("rush", [id]))
 		bottom.add_child(row["rush"])
@@ -355,17 +422,33 @@ func _upd_job_row(row: Dictionary, job: Dictionary) -> void:
 	row["name"].text = job["name"]
 	var left: float = job["left"]
 	var total: float = job["total"]
+	var rate: float = job["rate"]
 	(row["bar"] as ProgressBar).value = 1.0 - left / maxf(total, 0.001)
-	row["eta"].text = "%s left" % UI.mmss(left)
-	var tag: String = "Slop" if job["kind"] == "slop" else "%s, %s" % [Data.SIZES[job["size"]]["name"], Data.RISKS[job["risk"]]["name"]]
-	UI.pill_set(row["tag"], tag, UI.AMBER if job["kind"] == "slop" else UI.CYAN)
+	var eta: float = job["eta"]
+	row["eta"].text = "%s left" % UI.mmss(eta) if eta >= 0.0 else "stalled"
+	row["eta"].add_theme_color_override("font_color", UI.AMBER if eta >= 0.0 else UI.RED)
+	var tag: String = "Slop"
+	var tag_color := UI.AMBER
+	if job["kind"] == "update":
+		tag = "Update"
+		tag_color = UI.GREEN
+	elif job["kind"] == "product":
+		tag = "%s, %s" % [Data.SIZES[job["size"]]["name"], Data.RISKS[job["risk"]]["name"]]
+		tag_color = UI.CYAN
+	UI.pill_set(row["tag"], tag, tag_color)
+	row["info"].text = "%s of %s tokens  \u00b7  %s tok/s" % [UI.short(total - left), UI.short(total), _tps(rate)] if rate > 0.0 \
+		else "%s of %s tokens  \u00b7  waiting for compute" % [UI.short(total - left), UI.short(total)]
+	var on: bool = world.co["priority"] == job["id"]
+	if on != row["prio_on"]:
+		row["prio_on"] = on
+		UI.style_button(row["prio"], "purple" if on else "ghost")
 	if row.has("rush"):
 		var price: float = Company.rush_price(job)
 		row["rush"].text = "Rush  %s" % UI.cash(price)
 		row["rush"].disabled = price > world.money
 		row["rush"].tooltip_text = "Pay cash to finish right now" if price <= world.money else "You need %s" % UI.cash(price)
-		row["cancel"].text = "Cancel  (+%s tokens)" % UI.short(Company.cancel_refund(job))
-		row["info"].text = "Uses %s tokens" % UI.short(job["tokens"])
+		row["cancel"].text = "Cancel"
+		row["cancel"].tooltip_text = "Whatever compute went into it is gone"
 
 
 func _make_live_row(id: int, full: bool) -> Dictionary:
@@ -385,6 +468,10 @@ func _make_live_row(id: int, full: bool) -> Dictionary:
 	mid.add_child(row["bar"])
 	row["bar"].size_flags_horizontal = SIZE_EXPAND_FILL
 	mid.add_child(row["hype"])
+	row["serve"] = UI.bold("", 14)
+	row["serve"].clip_text = true
+	row["serve"].text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	v.add_child(row["serve"])
 	if full:
 		var bottom := _hbox(8)
 		v.add_child(bottom)
@@ -410,15 +497,27 @@ func _upd_live_row(row: Dictionary, item: Dictionary) -> void:
 	row["hype"].add_theme_color_override("font_color", _hype_color(hype))
 	var product: bool = item["kind"] == "product"
 	UI.pill_set(row["tag"], "Product" if product else "Slop", UI.CYAN if product else UI.AMBER)
+	var serve_label: Label = row["serve"]
+	if not product:
+		serve_label.text = "Needs no serving. Slop is not a service, it is a mess."
+		serve_label.add_theme_color_override("font_color", UI.FAINT)
+	else:
+		var demand: float = item["demand"]
+		var got: float = demand * float(item["fed"])
+		var fine: bool = float(item["fed"]) >= 0.8
+		serve_label.text = "needs %s tok/s, getting %s%s" % [_tps(demand), _tps(got), "" if fine else "  ·  users see errors, income is %d%%" % roundi(float(item["fed"]) * 100.0)]
+		serve_label.add_theme_color_override("font_color", UI.GREEN.lightened(0.1) if fine else UI.RED)
 	if row.has("info"):
 		row["info"].text = "Earned so far %s  ·  hype halves every %s" % [UI.cash(item["earned"]), UI.mmss(item["half_life"])]
 		var upd: Button = row["update"]
 		upd.visible = product
 		var cost: float = float(item["tokens"]) * Data.UPDATE_COST
-		var short: bool = cost > float(_co()["tokens"])
-		upd.disabled = short
-		upd.text = "%s  Update  %s tokens" % [UI.ic("update"), UI.short(cost)]
-		upd.tooltip_text = "Hype back to full. Each update excites people a little less." if not short else "Not enough tokens"
+		var queued := false
+		for job: Dictionary in _co()["jobs"]:
+			queued = queued or (job["kind"] == "update" and job["target"] == item["id"])
+		upd.disabled = queued
+		upd.text = "%s  Update  %s tokens" % [UI.ic("update"), UI.short(cost)] if not queued else "Updating..."
+		upd.tooltip_text = "A job like any other: when it is done hype is back to full. Each update excites people a little less."
 
 
 # --- overview ------------------------------------------------------------------------------------
@@ -451,10 +550,10 @@ func _build_overview() -> Control:
 	var cards := _hbox(12)
 	cards.size_flags_vertical = SIZE_EXPAND_FILL
 	tv.add_child(cards)
-	_ov["act_slop"] = _action_card(cards, "auto_awesome", UI.ACCENT, "Make some slop", "Cheap, fast and shameless. Quick money from spare tokens.", "Start slop", "primary", "slop")
+	_ov["act_slop"] = _action_card(cards, "auto_awesome", UI.ACCENT, "Make some slop", "Cheap, fast and shameless. Small jobs that a single server can finish.", "Start slop", "primary", "slop")
 	_ov["act_prod"] = _action_card(cards, "widgets", UI.GREEN, "Build a product", "", "New product", "success", "products")
 	_ov["act_model"] = _action_card(cards, "science", UI.PURPLE, "Models and training", "Smarter models unlock bigger things. Have one write the code for your own.", "Model Lab", "purple", "lab")
-	_ov["act_sell"] = _action_card(cards, "sell", UI.AMBER, "Sell tokens", "Storage full? Dump tokens on the raw market, at a poor price.", "Market", "secondary", "market")
+	_ov["act_sell"] = _action_card(cards, "show_chart", UI.AMBER, "Compute", "Where every token per second goes. Spare compute can be rented out, at a poor price.", "Compute", "secondary", "market")
 
 	var attn := UI.card(18)
 	_grow(attn, 1.0)
@@ -563,10 +662,12 @@ func _upd_overview() -> void:
 	var soonest := ""
 	var best := INF
 	for j: Dictionary in jobs:
-		if float(j["left"]) < best:
-			best = j["left"]
-			soonest = "%s, %s left" % [j["name"], UI.mmss(j["left"])]
-	_ov["dev"]["value"].text = "%d of %d slots" % [jobs.size(), co["slots"]]
+		if float(j["eta"]) >= 0.0 and float(j["eta"]) < best:
+			best = j["eta"]
+			soonest = "%s, %s left" % [j["name"], UI.mmss(j["eta"])]
+	if soonest == "" and not jobs.is_empty():
+		soonest = "Nothing is moving: no compute"
+	_ov["dev"]["value"].text = "%d of %d slots" % [_slots_used(co) - live.size(), co["slots"]]
 	_ov["dev"]["sub"].text = soonest if soonest != "" else "Nothing is being built"
 	_upd_costs()
 	_ov["live"]["value"].text = "%s/min" % UI.cash(co["income"])
@@ -575,12 +676,12 @@ func _upd_overview() -> void:
 	_ov["model"]["value"].add_theme_font_size_override("font_size", 22)
 	var training: Dictionary = co["training"]
 	if not training.is_empty():
-		_ov["model"]["sub"].text = "Training your own: %s left" % UI.mmss(training["left"])
+		_ov["model"]["sub"].text = "Training your own: %s" % (("%s left" % UI.mmss(training["eta"])) if float(training["eta"]) >= 0.0 else "stalled")
 	else:
 		_ov["model"]["sub"].text = "smartness %d, %s" % [model["smart"], ("rented, %s/min" % UI.cash(model["rent"])) if model["rented"] else "yours for good"]
 	if bool(plat["open"]):
 		_ov["plat"]["value"].text = "%s users" % UI.short(plat["users"])
-		_ov["plat"]["sub"].text = "%d%% of production reserved" % roundi(float(plat["share"]) * 100.0)
+		_ov["plat"]["sub"].text = "wants %s tok/s, gets %d%%" % [_tps(plat["want"]), roundi(float(plat["fed"]) * 100.0)]
 	else:
 		_ov["plat"]["value"].text = "Locked"
 		_ov["plat"]["sub"].text = "Needs a smartness %d model" % Data.PLATFORM_TIER
@@ -612,12 +713,11 @@ func _best_unlocked_blocked(co: Dictionary) -> String:
 func _upd_attention() -> void:
 	var co := _co()
 	var items: Array = []
-	var tokens: float = co["tokens"]
-	var storage: float = co["storage"]
+	var flow: Dictionary = co["flow"]
 	var model: Dictionary = co["model"]
 	if bool(co["overdue"]):
 		items.append({"icon": "warning", "color": UI.RED, "title": "Your account is below zero",
-			"detail": "The landlady has cut the internet and a rented model bounces. Sell tokens to get back above zero.", "tab": "market"})
+			"detail": "The landlady has cut the internet and a rented model bounces. Retire what costs money and keep the spare compute rented out.", "tab": "market"})
 	elif float(co["net"]) < 0.0 and float(co["upkeep"]) > 0.0:
 		items.append({"icon": "trending_down", "color": UI.RED, "title": "You are losing money",
 			"detail": "Upkeep is %s a minute and income only %s. Launch something or drop a model you rent." % [UI.cash(co["upkeep"]), UI.cash(co["income"])], "tab": "overview"})
@@ -634,25 +734,31 @@ func _upd_attention() -> void:
 	if best_new != "":
 		items.append({"icon": "psychology", "color": UI.PURPLE, "title": "%s is too weak for %s" % [model["name"], best_new],
 			"detail": "You have the funding for it, but the model in use is not smart enough. Switch models in the Lab.", "tab": "lab"})
-	if tokens >= storage * 0.9:
-		items.append({"icon": "storage", "color": UI.RED, "title": "Storage is nearly full",
-			"detail": "%s of %s tokens. Whatever the servers make beyond that is wasted: spend it or sell it." % [UI.short(tokens), UI.short(storage)], "tab": "market"})
+	var wasted_pct := roundi(float(flow["wasted"]) / maxf(float(flow["total"]), 0.001) * 100.0)
+	if float(flow["total"]) > 0.0 and wasted_pct >= 20:
+		items.append({"icon": "local_fire_department", "color": UI.RED, "title": "%d%% of your compute is heating the room for nothing" % wasted_pct,
+			"detail": "%s tok/s is made and not used. Start a job, or switch on \"Rent out spare compute\" so somebody pays for it." % _tps(flow["wasted"]), "tab": "market"})
 	for item: Dictionary in co["live"]:
 		if float(item["hype"]) < 0.35:
 			if item["kind"] == "product":
 				items.append({"icon": "update", "color": UI.AMBER, "title": "%s lost its hype" % item["name"],
-					"detail": "Hype is at %d%%. An update costs %s tokens and brings it back." % [roundi(float(item["hype"]) * 100.0), UI.short(float(item["tokens"]) * Data.UPDATE_COST)], "tab": "products"})
+					"detail": "Hype is at %d%%. An update is %s tokens of work and brings it back." % [roundi(float(item["hype"]) * 100.0), UI.short(float(item["tokens"]) * Data.UPDATE_COST)], "tab": "products"})
 			else:
 				items.append({"icon": "trending_down", "color": UI.AMBER, "title": "%s is fading" % item["name"],
 					"detail": "Hype is at %d%%. Retire it and start fresh slop." % roundi(float(item["hype"]) * 100.0), "tab": "slop"})
 	var plat: Dictionary = co["platform"]
-	if bool(plat["open"]) and float(plat["users"]) > 0.0 and float(plat["served"]) < float(plat["want"]) * 0.8:
+	if bool(plat["open"]) and float(plat["users"]) > 0.0 and float(plat["fed"]) < 0.8:
 		items.append({"icon": "error", "color": UI.RED, "title": "Platform users are not being served",
-			"detail": "They want %.1f tok/s and get %.1f. Unhappy users leave: reserve more production." % [plat["want"], plat["served"]], "tab": "platform"})
+			"detail": "They want %s tok/s and get %s. Unhappy users leave: add servers or retire something hungry." % [_tps(plat["want"]), _tps(plat["served"])], "tab": "platform"})
+	for item: Dictionary in co["live"]:
+		if item["kind"] == "product" and float(item["fed"]) < 0.8:
+			items.append({"icon": "cloud_off", "color": UI.RED, "title": "%s is starved" % item["name"],
+				"detail": "It needs %s tok/s and gets %s. Its income is %d%% and if it lasts, the hype rots faster." % [
+					_tps(item["demand"]), _tps(float(item["demand"]) * float(item["fed"])), roundi(float(item["fed"]) * 100.0)], "tab": "products"})
 	var free := _free_slots()
-	if free > 0 and tokens >= 400.0:
-		items.append({"icon": "view_in_ar", "color": UI.CYAN, "title": "%d free %s" % [free, "slot" if free == 1 else "slots"],
-			"detail": "Tokens sitting in storage earn nothing. Start something.", "tab": "slop"})
+	if free > 0 and float(flow["rented"]) + float(flow["wasted"]) > float(flow["total"]) * 0.5 and float(flow["total"]) > 0.0:
+		items.append({"icon": "view_in_ar", "color": UI.CYAN, "title": "%d free %s, spare compute" % [free, "slot" if free == 1 else "slots"],
+			"detail": "Most of your compute is idle or rented out for pennies. Start something.", "tab": "slop"})
 	var sig := ""
 	for it: Dictionary in items:
 		sig += it["title"] + "|"
@@ -731,8 +837,8 @@ func _build_slop() -> Control:
 		var grid2 := VBoxContainer.new()
 		grid2.add_theme_constant_override("separation", 2)
 		v.add_child(grid2)
-		_kv(grid2, "Cost", "%s tokens" % UI.short(def["tokens"]), UI.PURPLE.lightened(0.3))
-		var time := _kv(grid2, "Build time")
+		_kv(grid2, "Work", "%s tokens" % UI.short(def["tokens"]), UI.PURPLE.lightened(0.3))
+		var time := _kv(grid2, "Takes")
 		var income := _kv(grid2, "Income at launch", "", UI.GREEN)
 		_kv(grid2, "Lasts", "hype halves every %s" % UI.mmss(def["half_life"]))
 		var b := UI.btn("Start", "primary", 15)
@@ -757,7 +863,6 @@ func _upd_slop() -> void:
 	var speed: float = model["speed"]
 	var quality: float = model["productivity"]
 	var level: int = co["level"]
-	var tokens: float = co["tokens"]
 	var free := _free_slots()
 	for key: String in _sl["cards"]:
 		var def: Dictionary = Data.SLOP[key]
@@ -771,7 +876,7 @@ func _upd_slop() -> void:
 			UI.pill_set(card["lock"], "%s  %s" % [UI.ic("lock"), _stage_name(def["level"])], UI.AMBER)
 		elif model_block != "":
 			UI.pill_set(card["lock"], "%s  Smartness %d" % [UI.ic("lock"), def["smart"]], UI.PURPLE)
-		card["time"].text = UI.mmss(float(def["time"]) / speed)
+		card["time"].text = _takes(float(def["tokens"]), speed)
 		card["income"].text = "%s/min" % UI.cash(float(def["income"]) * quality)
 		var reason := ""
 		if stage_locked:
@@ -780,8 +885,6 @@ func _upd_slop() -> void:
 			reason = "Needs smartness %d" % def["smart"]
 		elif free <= 0:
 			reason = "No free slot"
-		elif float(def["tokens"]) > tokens:
-			reason = "Needs %s tokens" % UI.short(def["tokens"])
 		_set_enabled(card["btn"], reason, "Start")
 	var items: Array = []
 	for item: Dictionary in co["live"]:
@@ -794,7 +897,7 @@ func _upd_slop() -> void:
 
 func _build_products() -> Control:
 	var page := _page()
-	page.add_child(UI.section("Products", "Real software, allegedly. Slower and pricier than slop, but it lasts and can be updated.", "widgets", UI.GREEN))
+	page.add_child(UI.section("Products", "Real software, allegedly. Takes real infrastructure to build, and then to keep serving. Lasts, and can be updated.", "widgets", UI.GREEN))
 	var top := _hbox(14)
 	page.add_child(top)
 
@@ -825,7 +928,7 @@ func _build_products() -> Control:
 	group = ButtonGroup.new()
 	for i in Data.SIZES.size():
 		var s: Dictionary = Data.SIZES[i]
-		var b := UI.choice_button("%s\nx%s cost, x%s time, x%s income" % [s["name"], _x(s["cost"]), _x(s["time"]), _x(s["income"])], group)
+		var b := UI.choice_button("%s\nx%s work, x%s serving, x%s income" % [s["name"], _x(s["cost"]), _x(s["serve"]), _x(s["income"])], group)
 		b.custom_minimum_size.y = 58
 		b.size_flags_horizontal = SIZE_EXPAND_FILL
 		b.button_pressed = i == _p_size
@@ -837,7 +940,7 @@ func _build_products() -> Control:
 	group = ButtonGroup.new()
 	for i in Data.RISKS.size():
 		var r: Dictionary = Data.RISKS[i]
-		var b := UI.choice_button("%s\nluck x%s to x%s, time x%s" % [r["name"], _x(r["low"]), _x(r["high"]), _x(r["time"])], group)
+		var b := UI.choice_button("%s\nluck x%s to x%s, work x%s" % [r["name"], _x(r["low"]), _x(r["high"]), _x(r["time"])], group)
 		b.custom_minimum_size.y = 58
 		b.size_flags_horizontal = SIZE_EXPAND_FILL
 		b.button_pressed = i == _p_risk
@@ -863,11 +966,12 @@ func _build_products() -> Control:
 	_pr["blurb"].custom_minimum_size.y = 40
 	sv.add_child(_pr["blurb"])
 	sv.add_child(UI.rule())
-	_pr["cost"] = _kv(sv, "Cost", "", UI.PURPLE.lightened(0.3))
-	_pr["time"] = _kv(sv, "Build time")
+	_pr["cost"] = _kv(sv, "Work", "", UI.PURPLE.lightened(0.3))
+	_pr["time"] = _kv(sv, "Takes")
+	_pr["serve"] = _kv(sv, "Then it needs", "", UI.CYAN)
 	_pr["income"] = _kv(sv, "Income at launch", "", UI.GREEN)
 	_pr["lasts"] = _kv(sv, "Lasts")
-	_pr["update"] = _kv(sv, "An update costs")
+	_pr["update"] = _kv(sv, "An update is")
 	_pr["risk"] = UI.wrap(UI.caption(""))
 	_pr["risk"].add_theme_font_size_override("font_size", 14)
 	sv.add_child(_pr["risk"])
@@ -888,7 +992,7 @@ func _build_products() -> Control:
 		var cv := _vbox(10)
 		c.add_child(cv)
 		if k == "dev":
-			cv.add_child(UI.section("In development", "Rush it with cash or cancel for most of your tokens back", "build", UI.AMBER))
+			cv.add_child(UI.section("In development", "Rush it with cash, or give one job priority", "build", UI.AMBER))
 		else:
 			cv.add_child(UI.section("Live products", "Update before the hype runs out", "payments", UI.GREEN))
 		_pr[k + "_empty"] = _hint("Nothing is being built." if k == "dev" else "No products are live yet.")
@@ -896,6 +1000,17 @@ func _build_products() -> Control:
 		_pr[k + "_list"] = _vbox(8)
 		cv.add_child(_pr[k + "_list"])
 	return page
+
+
+## How long this much work takes with the whole stream on it ("never" with no compute).
+func _takes(work: float, speed: float) -> String:
+	var tps: float = float(_co()["rate"]) * speed
+	if tps <= 0.0:
+		return "never: no compute"
+	var seconds := work / tps
+	if seconds >= 36000.0:
+		return "%.0f hours at %s tok/s" % [seconds / 3600.0, _tps(float(_co()["rate"]))]
+	return "%s at %s tok/s" % [UI.mmss(seconds), _tps(float(_co()["rate"]))]
 
 
 func _x(v: float) -> String:
@@ -913,7 +1028,7 @@ func _upd_products() -> void:
 		var b: Button = _pr["types"][key]
 		var stage_locked: bool = int(def["level"]) > level
 		var model_block := Data.can_make(model, "product", key)
-		var second := "from %s tokens" % UI.short(def["tokens"])
+		var second := "from %s tokens of work" % UI.short(def["tokens"])
 		if stage_locked:
 			second = "%s  %s" % [UI.ic("lock"), _stage_name(def["level"])]
 		elif model_block != "":
@@ -923,17 +1038,19 @@ func _upd_products() -> void:
 	var def: Dictionary = Data.PRODUCTS[_p_what]
 	var size: Dictionary = Data.SIZES[_p_size]
 	var risk: Dictionary = Data.RISKS[_p_risk]
-	var cost: float = float(def["tokens"]) * float(size["cost"])
-	var seconds: float = float(def["time"]) * float(size["time"]) * float(risk["time"]) / speed
+	var cost: float = Data.work("product", _p_what, _p_size, _p_risk)
 	var base_income: float = float(def["income"]) * float(size["income"]) * quality
 	_pr["name"].text = def["name"]
 	_pr["blurb"].text = def["blurb"]
 	UI.chip_set(_pr["chip"], PRODUCT_ICONS.get(_p_what, "widgets"), UI.GREEN)
 	_pr["cost"].text = "%s tokens" % UI.short(cost)
-	_pr["time"].text = UI.mmss(seconds) + ("" if speed <= 1.0 else "  (model x%.2f)" % speed)
+	_pr["time"].text = _takes(cost, speed)
+	var need := Data.serve_for(_p_what, _p_size)
+	_pr["serve"].text = "up to %s tok/s to serve" % _tps(need)
+	_pr["serve"].add_theme_color_override("font_color", UI.CYAN if need * 1.2 <= float(co["rate"]) else UI.AMBER)
 	_pr["income"].text = "%s to %s /min" % [UI.cash(base_income * float(risk["low"])), UI.cash(base_income * float(risk["high"]))]
 	_pr["lasts"].text = "hype halves every %s" % UI.mmss(def["half_life"])
-	_pr["update"].text = "%s tokens" % UI.short(cost * Data.UPDATE_COST)
+	_pr["update"].text = "%s tokens of work" % UI.short(cost * Data.UPDATE_COST)
 	_pr["risk"].text = "%s: %s  Model reliability %d%%: that is the chance the launch is not half hallucinated." % [risk["name"], risk["blurb"], roundi(float(model["reliability"]) * 100.0)]
 	var reason := ""
 	var blocked := Data.can_make(model, "product", _p_what)
@@ -944,8 +1061,6 @@ func _upd_products() -> void:
 		_pr["risk"].text = blocked
 	elif _free_slots() <= 0:
 		reason = "No free slot"
-	elif cost > float(co["tokens"]):
-		reason = "Needs %s tokens" % UI.short(cost)
 	_set_enabled(_pr["build"], reason, "%s  Build" % UI.ic("rocket_launch"))
 
 	if _tab != "products":
@@ -1007,6 +1122,11 @@ func _build_lab() -> Control:
 	ch.add_child(_lb["code_name"])
 	_lb["code_eta"] = UI.bold("", 15, UI.CYAN)
 	ch.add_child(_lb["code_eta"])
+	_lb["code_prio_on"] = false
+	_lb["code_prio"] = UI.btn("", "ghost", 14)
+	_lb["code_prio"].tooltip_text = "Feed this one first. Everything else shares what it leaves."
+	_lb["code_prio"].pressed.connect(func() -> void: world.request_company("priority", [_co()["coding"]["id"]]))
+	ch.add_child(_lb["code_prio"])
 	_lb["code_bar"] = UI.bar(0.0, UI.CYAN, 10)
 	cv.add_child(_lb["code_bar"])
 	_lb["code_info"] = UI.caption("")
@@ -1057,10 +1177,10 @@ func _build_lab() -> Control:
 	_lb["p_speed"] = _kv(left, "Speed", "", UI.AMBER)
 	var right := _vbox(4)
 	pr.add_child(right)
-	_lb["p_cost"] = _kv(right, "Training cost", "", UI.PURPLE.lightened(0.3))
-	_lb["p_time"] = _kv(right, "Training time")
+	_lb["p_cost"] = _kv(right, "Training work", "", UI.PURPLE.lightened(0.3))
+	_lb["p_time"] = _kv(right, "Takes")
 	_lb["p_fail"] = _kv(right, "Chance the run fails", "", UI.AMBER)
-	_lb["p_note"] = UI.wrap(UI.caption("A failed run (loss goes to NaN) returns half the tokens."))
+	_lb["p_note"] = UI.wrap(UI.caption("A failed run (loss goes to NaN) restarts from a checkpoint at the halfway mark."))
 	right.add_child(_lb["p_note"])
 	_lb["train"] = UI.btn("Train", "purple", 17)
 	_lb["train"].custom_minimum_size.y = 46
@@ -1074,8 +1194,15 @@ func _build_lab() -> Control:
 	tl.add_child(_lb["train_name"])
 	_lb["train_eta"] = UI.bold("", 15, UI.PURPLE.lightened(0.3))
 	tl.add_child(_lb["train_eta"])
+	_lb["train_prio_on"] = false
+	_lb["train_prio"] = UI.btn("%s  Priority" % UI.ic("flag"), "ghost", 14)
+	_lb["train_prio"].tooltip_text = "Feed this one first. Everything else shares what it leaves."
+	_lb["train_prio"].pressed.connect(func() -> void: world.request_company("priority", [_co()["training"]["id"]]))
+	tl.add_child(_lb["train_prio"])
 	_lb["train_bar"] = UI.bar(0.0, UI.PURPLE, 12)
 	_lb["train_box"].add_child(_lb["train_bar"])
+	_lb["train_info"] = UI.caption("")
+	_lb["train_box"].add_child(_lb["train_info"])
 	return page
 
 
@@ -1190,13 +1317,17 @@ func _upd_lab() -> void:
 	var stack: Dictionary = co["stack"]
 	var coding: Dictionary = co["coding"]
 	var cap := Data.code_cap(model)
-	var tokens: float = co["tokens"]
 	_lb["code_box"].visible = not coding.is_empty()
 	if not coding.is_empty():
 		_lb["code_name"].text = "Writing %s, level %d" % [Data.COMPONENTS[coding["part"]]["name"], coding["level"]]
-		_lb["code_eta"].text = "%s left" % UI.mmss(coding["left"])
+		_lb["code_eta"].text = "%s left" % UI.mmss(coding["eta"]) if float(coding["eta"]) >= 0.0 else "stalled"
+		_lb["code_info"].text = "%s tok/s on it  \u00b7  %d%% chance it does not even run (it imports a library that does not exist)." % [_tps(coding["rate"]), roundi(float(coding["fail"]) * 100.0)]
+		_lb["code_prio"].text = "%s  Priority" % UI.ic("flag")
+		var cp_on: bool = co["priority"] == coding["id"]
+		if cp_on != _lb["code_prio_on"]:
+			_lb["code_prio_on"] = cp_on
+			UI.style_button(_lb["code_prio"], "purple" if cp_on else "ghost")
 		(_lb["code_bar"] as ProgressBar).value = 1.0 - float(coding["left"]) / maxf(float(coding["total"]), 0.001)
-		_lb["code_info"].text = "%d%% chance it does not even run (it imports a library that does not exist)." % roundi(float(coding["fail"]) * 100.0)
 	for key: String in _lb["parts"]:
 		var part: Dictionary = _lb["parts"][key]
 		var level: int = stack[key]
@@ -1207,14 +1338,12 @@ func _upd_lab() -> void:
 			reason = "Maxed out"
 			part["info"].text = "Level %d: as good as code gets." % level
 		else:
-			part["info"].text = "Level %d: %s tokens, %s, %d%% it fails" % [next, UI.short(Data.code_cost(next)), UI.mmss(Data.code_time(next) / float(model["speed"])), roundi(Data.code_fail(model) * 100.0)]
+			part["info"].text = "Level %d: %s tokens of work, %d%% it fails" % [next, UI.short(Data.code_cost(next)), roundi(Data.code_fail(model) * 100.0)]
 			if not coding.is_empty():
 				reason = "Busy writing"
 			elif next > cap:
 				reason = "Model too weak"
 				part["info"].text = "%s can only write up to level %d." % [model["name"], cap]
-			elif Data.code_cost(next) > tokens:
-				reason = "Needs %s tokens" % UI.short(Data.code_cost(next))
 		_set_enabled(part["btn"], reason, "Write level %d" % next)
 
 	var plan: Dictionary = co["plan"]
@@ -1225,23 +1354,23 @@ func _upd_lab() -> void:
 	_lb["p_rel"].text = "%d%%" % roundi(float(p["reliability"]) * 100.0)
 	_lb["p_speed"].text = "x%s" % _x(p["speed"])
 	_lb["p_cost"].text = "%s tokens" % UI.short(p["tokens"])
-	_lb["p_cost"].add_theme_color_override("font_color", UI.RED if float(p["tokens"]) > tokens and training.is_empty() else UI.PURPLE.lightened(0.3))
-	_lb["p_time"].text = UI.mmss(p["time"])
+	_lb["p_time"].text = _takes(float(p["tokens"]), float(model["speed"]))
 	_lb["p_fail"].text = "%d%%" % roundi(float(p["fail"]) * 100.0)
 	var reason := ""
 	if not training.is_empty():
 		reason = "Already training"
 	elif not bool(plan["ready"]):
 		reason = "Every part needs level 1 first"
-	elif float(plan["tokens"]) > float(co["storage"]):
-		reason = "Needs more storage: next funding stage"
-	elif float(plan["tokens"]) > tokens:
-		reason = "Needs %s tokens" % UI.short(plan["tokens"])
 	_set_enabled(_lb["train"], reason, "%s  Train a smartness %d model" % [UI.ic("science"), plan["smart"]])
 	_lb["train_box"].visible = not training.is_empty()
 	if not training.is_empty():
 		_lb["train_name"].text = "Training a smartness %d model" % p["smart"]
-		_lb["train_eta"].text = "%s left" % UI.mmss(training["left"])
+		_lb["train_eta"].text = "%s left" % UI.mmss(training["eta"]) if float(training["eta"]) >= 0.0 else "stalled"
+		_lb["train_info"].text = "%s tok/s on it" % _tps(training["rate"])
+		var tp_on: bool = co["priority"] == training["id"]
+		if tp_on != _lb["train_prio_on"]:
+			_lb["train_prio_on"] = tp_on
+			UI.style_button(_lb["train_prio"], "purple" if tp_on else "ghost")
 		(_lb["train_bar"] as ProgressBar).value = 1.0 - float(training["left"]) / maxf(float(training["total"]), 0.001)
 
 
@@ -1249,7 +1378,7 @@ func _upd_lab() -> void:
 
 func _build_platform() -> Control:
 	var page := _page()
-	page.add_child(UI.section("API platform", "Sell tokens to other people's apps, one request at a time.", "dns", UI.CYAN))
+	page.add_child(UI.section("API platform", "Serve other people's apps, one request at a time. They get served first, before any job.", "dns", UI.CYAN))
 	_pf["locked"] = UI.card(28)
 	page.add_child(_pf["locked"])
 	var lv := _vbox(12)
@@ -1260,7 +1389,7 @@ func _build_platform() -> Control:
 	var lt := _vbox(2)
 	lh.add_child(lt)
 	lt.add_child(UI.bold("The platform is locked", 20))
-	lt.add_child(UI.wrap(UI.caption("Nobody pays for tokens from a toy model. Use a model of smartness %d or better (rented, bought or your own), then come back to find users." % Data.PLATFORM_TIER)))
+	lt.add_child(UI.wrap(UI.caption("Nobody pays for answers from a toy model. Use a model of smartness %d or better (rented, bought or your own), then come back to find users." % Data.PLATFORM_TIER)))
 	var go := UI.btn("Open the Model Lab", "purple", 16)
 	go.size_flags_horizontal = SIZE_SHRINK_BEGIN
 	go.pressed.connect(func() -> void: _go("lab"))
@@ -1279,35 +1408,13 @@ func _build_platform() -> Control:
 	for k: String in ["users", "want", "served", "price", "rev"]:
 		tiles.add_child(_pf[k]["root"])
 
-	var share := UI.card(18)
-	open.add_child(share)
-	var sv := _vbox(10)
-	share.add_child(sv)
-	sv.add_child(UI.section("Reserve production", "Share of the tokens your servers make that goes to platform users first. The rest is stored.", "tune", UI.CYAN))
-	var sr := _hbox(16)
-	sv.add_child(sr)
-	_pf["slider"] = HSlider.new()
-	_pf["slider"].min_value = 0.0
-	_pf["slider"].max_value = 1.0
-	_pf["slider"].step = 0.05
-	_pf["slider"].custom_minimum_size = Vector2(300, 28)
-	_pf["slider"].size_flags_horizontal = SIZE_EXPAND_FILL
-	_pf["slider"].size_flags_vertical = SIZE_SHRINK_CENTER
-	UI.style_slider(_pf["slider"])
-	_pf["slider"].drag_started.connect(func() -> void: _dragging = true)
-	_pf["slider"].drag_ended.connect(func(_changed: bool) -> void:
-		_dragging = false
-		_share_hold = Time.get_ticks_msec() + 1200
-		world.request_company("share", [snappedf(_pf["slider"].value, 0.05)]))
-	_pf["slider"].value_changed.connect(func(value: float) -> void: _share_text(value))
-	sr.add_child(_pf["slider"])
-	_pf["share_val"] = UI.big("0%", UI.CYAN, 26)
-	_pf["share_val"].custom_minimum_size.x = 90
-	_pf["share_val"].horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	sr.add_child(_pf["share_val"])
-	_pf["share_note"] = UI.wrap(UI.caption(""))
-	_pf["share_note"].add_theme_font_size_override("font_size", 14)
-	sv.add_child(_pf["share_note"])
+	var need := UI.inset(16)
+	open.add_child(need)
+	var nr := _hbox(12)
+	need.add_child(nr)
+	nr.add_child(UI.chip("dns", UI.CYAN, 36))
+	_pf["note"] = _grow(UI.wrap(UI.body("", UI.DIM)))
+	nr.add_child(_pf["note"])
 
 	var camp := UI.card(18)
 	open.add_child(camp)
@@ -1357,13 +1464,6 @@ func _build_platform() -> Control:
 	return page
 
 
-func _share_text(value: float) -> void:
-	var co := _co()
-	_pf["share_val"].text = "%d%%" % roundi(value * 100.0)
-	var rate: float = co.get("rate", 0.0)
-	_pf["share_note"].text = "Up to %.1f tok/s of your %.1f tok/s production is held back for the platform." % [rate * value, rate]
-
-
 func _upd_platform() -> void:
 	var co := _co()
 	var plat: Dictionary = co["platform"]
@@ -1376,20 +1476,17 @@ func _upd_platform() -> void:
 	var want: float = plat["want"]
 	_pf["users"]["value"].text = UI.short(plat["users"])
 	_pf["users"]["sub"].text = "using the platform"
-	_pf["want"]["value"].text = "%.1f tok/s" % want
+	_pf["want"]["value"].text = "%s tok/s" % _tps(want)
 	_pf["want"]["sub"].text = "what they would like"
-	_pf["served"]["value"].text = "%.1f tok/s" % served
+	_pf["served"]["value"].text = "%s tok/s" % _tps(served)
 	var short: bool = want > 0.0 and served < want * 0.8
 	_pf["served"]["value"].add_theme_color_override("font_color", UI.RED if short else UI.GREEN)
-	_pf["served"]["sub"].text = "users are leaving: reserve more" if short else ("everybody is served" if want > 0.0 else "no users yet")
+	_pf["served"]["sub"].text = "users are leaving: add servers" if short else ("everybody is served" if want > 0.0 else "no users yet")
 	_pf["price"]["value"].text = "$%.2f" % plat["price"]
 	_pf["price"]["sub"].text = "per token, model x%.2f" % co["model"]["productivity"]
 	_pf["rev"]["value"].text = "%s/min" % UI.cash(served * float(plat["price"]) * 60.0)
 	_pf["rev"]["sub"].text = "from the platform alone"
-	var slider: HSlider = _pf["slider"]
-	if not _dragging and Time.get_ticks_msec() > _share_hold:
-		slider.set_value_no_signal(float(plat["share"]))
-		_share_text(float(plat["share"]))
+	_pf["note"].text = "Everybody on the platform needs about %s tok/s, all day, and gets it before any job does. More users means more servers kept busy. Fewer than 80%% served and they start to leave." % _tps(want)
 	var camp: Dictionary = plat["campaign"]
 	var running := not camp.is_empty()
 	_pf["run_box"].visible = running
@@ -1413,15 +1510,45 @@ func _upd_platform() -> void:
 
 func _build_market() -> Control:
 	var page := _page()
-	page.add_child(UI.section("Token market", "The raw price is bad on purpose. Slop and products pay far better.", "show_chart", UI.AMBER))
+	page.add_child(UI.section("Compute", "Tokens per second are a stream, not a stock. Use them now or they heat the room for nothing.", "show_chart", UI.AMBER))
 	var row := _hbox(14)
 	page.add_child(row)
+
+	var fc := UI.card(20)
+	_grow(fc, 1.3)
+	row.add_child(fc)
+	var fv := _vbox(10)
+	fc.add_child(fv)
+	fv.add_child(UI.caption("YOUR SERVERS MAKE"))
+	_mk["total"] = UI.big("", UI.TEXT, 44)
+	fv.add_child(_mk["total"])
+	_mk["bar"] = _flow_bar(14)
+	fv.add_child(_mk["bar"]["root"])
+	_mk["rows"] = {}
+	for key: String in FLOW_KEYS:
+		var r := _hbox(10)
+		fv.add_child(r)
+		var dot := ColorRect.new()
+		dot.color = _flow_color(key)
+		dot.custom_minimum_size = Vector2(12, 12)
+		dot.size_flags_vertical = SIZE_SHRINK_CENTER
+		r.add_child(dot)
+		var nm := UI.body(FLOW_NAMES[key], UI.DIM)
+		nm.size_flags_horizontal = SIZE_EXPAND_FILL
+		r.add_child(nm)
+		var val := UI.bold("", 16)
+		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		r.add_child(val)
+		_mk["rows"][key] = val
+	_mk["verdict"] = UI.wrap(UI.body("", UI.DIM))
+	fv.add_child(_mk["verdict"])
+
 	var spot := UI.card(20)
 	_grow(spot, 1.0)
 	row.add_child(spot)
 	var sv := _vbox(8)
 	spot.add_child(sv)
-	sv.add_child(UI.caption("RAW TOKEN PRICE"))
+	sv.add_child(UI.caption("RENTAL PRICE, PER TOKEN"))
 	var sh := _hbox(12)
 	sv.add_child(sh)
 	_mk["spot"] = UI.big("", UI.TEXT, 44)
@@ -1435,40 +1562,27 @@ func _build_market() -> Control:
 	rr.add_child(_grow(UI.caption("$%.2f low" % Data.SPOT_MIN)))
 	rr.add_child(UI.caption("$%.2f high" % Data.SPOT_MAX))
 	sv.add_child(UI.caption("The price drifts every 10 seconds."))
+	_mk["bonus"] = UI.wrap(UI.caption(""))
+	sv.add_child(_mk["bonus"])
 
-	var stock := UI.card(20)
-	_grow(stock, 1.0)
-	row.add_child(stock)
-	var kv := _vbox(8)
-	stock.add_child(kv)
-	kv.add_child(UI.caption("YOUR STORED TOKENS"))
-	_mk["tokens"] = UI.big("", UI.PURPLE.lightened(0.2), 44)
-	kv.add_child(_mk["tokens"])
-	_mk["worth"] = UI.body("", UI.GREEN)
-	kv.add_child(_mk["worth"])
-	_mk["fill"] = UI.bar(0.0, UI.PURPLE, 10)
-	kv.add_child(_mk["fill"])
-	_mk["cap"] = UI.caption("")
-	kv.add_child(_mk["cap"])
-
-	var sell := UI.card(20)
-	page.add_child(sell)
-	var cv := _vbox(12)
-	sell.add_child(cv)
-	cv.add_child(UI.section("Sell raw tokens", "Instant cash, no slot needed.", "sell", UI.AMBER))
-	var br := _hbox(12)
-	cv.add_child(br)
-	_mk["sell"] = []
-	for entry: Array in [[0.25, "Sell 25%"], [0.5, "Sell 50%"], [0.0, "Sell everything"]]:
-		var frac: float = entry[0]
-		var b := UI.btn("", "secondary", 16)
-		b.custom_minimum_size.y = 64
-		b.size_flags_horizontal = SIZE_EXPAND_FILL
-		b.pressed.connect(func() -> void:
-			var have: float = _co()["tokens"]
-			world.request_company("sell", [0.0 if frac <= 0.0 else floorf(have * frac)]))
-		br.add_child(b)
-		_mk["sell"].append([b, frac, entry[1]])
+	var sw := UI.card(20)
+	page.add_child(sw)
+	var wv := _vbox(12)
+	sw.add_child(wv)
+	wv.add_child(UI.section("Rent out spare compute", "Whatever serving and jobs leave over is sold by the second. The worst deal there is.", "sell", UI.AMBER))
+	var wr := _hbox(16)
+	wv.add_child(wr)
+	_mk["switch"] = CheckButton.new()
+	UI.style_check(_mk["switch"])
+	_mk["switch"].size_flags_vertical = SIZE_SHRINK_CENTER
+	_mk["switch"].toggled.connect(func(on: bool) -> void:
+		if on != bool(_co()["rental"]["on"]):
+			world.request_company("rent", [on]))
+	wr.add_child(_mk["switch"])
+	_mk["switch_text"] = _grow(UI.wrap(UI.bold("", 17)))
+	wr.add_child(_mk["switch_text"])
+	_mk["income"] = UI.big("", UI.GREEN, 28)
+	wr.add_child(_mk["income"])
 
 	var cmp := UI.inset(18)
 	page.add_child(cmp)
@@ -1479,7 +1593,7 @@ func _build_market() -> Control:
 	ch.add_child(_mk["cmp_chip"])
 	var ct := _vbox(2)
 	ch.add_child(ct)
-	ct.add_child(UI.bold("Is selling worth it?", 17))
+	ct.add_child(UI.bold("Is renting worth it?", 17))
 	_mk["cmp"] = UI.wrap(UI.body("", UI.DIM))
 	ct.add_child(_mk["cmp"])
 	return page
@@ -1487,48 +1601,60 @@ func _build_market() -> Control:
 
 func _upd_market() -> void:
 	var co := _co()
-	var tokens: float = co["tokens"]
+	var flow: Dictionary = co["flow"]
+	var rental: Dictionary = co["rental"]
+	var total: float = flow["total"]
+	_mk["total"].text = "%s tok/s" % _tps(total)
+	_flow_set(_mk["bar"], flow)
+	for key: String in FLOW_KEYS:
+		var v: float = flow[key]
+		_mk["rows"][key].text = "%s tok/s  (%d%%)" % [_tps(v), roundi(v / maxf(total, 0.001) * 100.0)]
+	var wasted := roundi(float(flow["wasted"]) / maxf(total, 0.001) * 100.0)
+	if total <= 0.0:
+		_mk["verdict"].text = "Nothing is switched on. The silence is almost relaxing."
+	elif wasted <= 0:
+		_mk["verdict"].text = "Every token has a job. Suspiciously efficient."
+	else:
+		_mk["verdict"].text = "%d%% of your compute is heating the room for nothing." % wasted
 	var spot: float = co["spot"]
 	var trend: int = co["spot_trend"]
-	_mk["spot"].text = "$%.3f" % spot
+	_mk["spot"].text = "$%.3f" % float(rental["price"])
 	var trend_icon := "trending_up" if trend > 0 else ("trending_down" if trend < 0 else "trending_flat")
 	var trend_color := UI.GREEN if trend > 0 else (UI.RED if trend < 0 else UI.DIM)
 	UI.pill_set(_mk["trend"], "%s  %s" % [UI.ic(trend_icon), "rising" if trend > 0 else ("falling" if trend < 0 else "steady")], trend_color)
 	(_mk["range"] as ProgressBar).value = clampf((spot - Data.SPOT_MIN) / (Data.SPOT_MAX - Data.SPOT_MIN), 0.0, 1.0)
-	_mk["tokens"].text = "%s tokens" % UI.short(tokens)
-	_mk["worth"].text = "Worth %s at today's price" % UI.cash(tokens * spot)
-	(_mk["fill"] as ProgressBar).value = tokens / maxf(float(co["storage"]), 1.0)
-	_mk["cap"].text = "of %s storage" % UI.short(co["storage"])
-	for entry: Array in _mk["sell"]:
-		var b: Button = entry[0]
-		var frac: float = entry[1]
-		var amount := tokens if frac <= 0.0 else floorf(tokens * frac)
-		b.disabled = amount < 1.0
-		b.text = "%s\n%s tokens for %s" % [entry[2], UI.short(amount), UI.cash(amount * spot)]
+	var bonus := Data.rent_bonus(int(co["level"]))
+	_mk["bonus"].text = "Market $%.3f, x%s for being a %s company." % [spot, _x(bonus), co["stage"]]
+	var sw: CheckButton = _mk["switch"]
+	if sw.button_pressed != bool(rental["on"]):
+		sw.set_pressed_no_signal(bool(rental["on"]))
+	_mk["switch_text"].text = "Renting out spare compute" if bool(rental["on"]) else "Spare compute is going to waste"
+	_mk["income"].text = "+%s/min" % UI.cash(rental["income"]) if bool(rental["on"]) else "$0/min"
+	_mk["income"].add_theme_color_override("font_color", UI.GREEN if bool(rental["on"]) else UI.FAINT)
 
-	# the honest comparison: the same tokens as the best slop we can afford right now
+	# the honest comparison: what the same compute is worth as the best slop we can run
 	var quality: float = co["model"]["productivity"]
 	var best_key := ""
 	var best_ratio := 0.0
 	for key: String in Data.SLOP:
 		var def: Dictionary = Data.SLOP[key]
-		if int(def["level"]) > int(co["level"]) or float(def["tokens"]) > tokens or Data.can_make(co["models"][co["active"]], "slop", key) != "":
+		if int(def["level"]) > int(co["level"]) or Data.can_make(co["models"][co["active"]], "slop", key) != "":
 			continue
 		var ratio := _slop_lifetime(def, quality) / float(def["tokens"])
 		if ratio > best_ratio:
 			best_ratio = ratio
 			best_key = key
 	if best_key == "":
-		_mk["cmp"].text = "You cannot afford any slop yet (the cheapest takes %s tokens). Selling is all you can do, but waiting for more tokens pays better." % UI.short(Data.SLOP["seo"]["tokens"])
+		_mk["cmp"].text = "Nothing you can make right now beats it."
 		UI.chip_set(_mk["cmp_chip"], "info", UI.DIM)
 	else:
 		var def: Dictionary = Data.SLOP[best_key]
-		var cost: float = def["tokens"]
+		var work: float = def["tokens"]
 		var as_slop := _slop_lifetime(def, quality)
-		var as_cash := cost * spot
+		var as_cash := work * float(rental["price"])
 		var extra := "" if _free_slots() > 0 else " (all your slots are busy right now)"
-		_mk["cmp"].text = "Put %s tokens into %s and it earns about %s over its life. Sold raw, the same tokens fetch %s. That is %.1fx more%s." % [
-			UI.short(cost), def["name"], UI.cash(as_slop), UI.cash(as_cash), as_slop / maxf(as_cash, 0.01), extra]
+		_mk["cmp"].text = "Spend %s tokens on %s and it earns about %s over its life. Rented out, the same tokens fetch %s. That is %.0fx more%s." % [
+			UI.short(work), def["name"], UI.cash(as_slop), UI.cash(as_cash), as_slop / maxf(as_cash, 0.01), extra]
 		UI.chip_set(_mk["cmp_chip"], "trending_up", UI.GREEN)
 
 

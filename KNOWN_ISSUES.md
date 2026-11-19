@@ -29,7 +29,7 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Puddles are flat discs that ignore walls, and nothing mops them up: they dry by themselves.
 - The ops screen text is small from across the garage; it reads well from a few steps away.
 - Flow rate is a fixed 20 l/min per running pump; "back" temperature is shown but does not affect anything.
-- The HUD shows only weather and temperature now; money, tokens and watts are on the ops screen, in the company menu and (balance) in the shop.
+- The HUD shows only weather and temperature now; money, compute and watts are on the ops screen, in the company menu and (balance) in the shop.
 - Without a thermometer the HUD shows "? °C" indoors even while you are overheating; the red screen tint is the only warning.
 - Passing out from heat just moves you to the driveway. Nobody has to rescue you.
 - A server with one liquid-cooled card and one ordinary card is treated as fully liquid-cooled.
@@ -42,7 +42,8 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Only sprinting trips over cables; there is no falling animation, just a stumble.
 
 - The economy is unbalanced: every number in `company_data.gd` is a first guess that nobody has played.
-- At the start there is no income until you have tokens to sell: the first minutes are pedalling for $0.10 a token.
+- At the start the only income is renting out the starter machine's 3.5 tok/s (about $2 to $6 a minute, less than the garage rent) until the first slop is live.
+- Job sizes, serving demands and the rental price (`company_data.gd`) are first guesses scaled from the old stockpile numbers: the time to finish a product at the intended compute is only roughly right.
 - Fuel no longer competes with income the way it did; generator running costs need another look.
 
 ## Untested

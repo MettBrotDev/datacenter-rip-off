@@ -34,8 +34,8 @@ Next: network loops, generator fumes and noise, a mop, throwing buckets of water
 immersion cooling in a paddling pool.
 
 ## Company layer (milestone 4)
-Built: tokens as a currency, the raw token market, slop, products, model training, the API platform,
-funding stages, random company events.
+Built: tokens per second as live compute (served, worked on, rented out or wasted: it cannot be stored), the rental
+market, slop, products that need serving, model training, the API platform, funding stages, random company events.
 Needs: balancing (nothing has been played), staff or automation, more events, a way to lose
 (debt? investors?), research that unlocks hardware, the reactors' reason to exist (megawatt compute).
 
