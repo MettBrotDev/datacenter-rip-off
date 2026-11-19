@@ -28,10 +28,10 @@ Also built: rain falls only where there is no roof, and ruins unpacked electroni
 Ideas: day and night, wind (and wind turbines), storms, tarps or carports to shelter a pad, drying or repairing wet hardware.
 
 ## Chaos layer (milestone 3)
-Built: room heat with throttling and shutdown, fire and extinguishers, power strips that melt,
-tripping over cables, used parts that are dead on arrival, a dumpster.
-Next: the cooling system for high-end hardware (proposal pending the owner's choice), coolant leaks,
-network loops, generator fumes and noise.
+Built: room and chip temperatures, liquid cooling with hoses that leak and spray, fire and
+extinguishers, power strips that melt, tripping over cables, dud used parts, a heat suit, a dumpster.
+Next: network loops, generator fumes and noise, a mop, throwing buckets of water, taps on every house,
+immersion cooling in a paddling pool.
 
 ## Company layer (milestone 4)
 Products and AI models, marketing, progression, staff or automation.

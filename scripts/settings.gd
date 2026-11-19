@@ -57,9 +57,23 @@ func reset() -> void:
 	changed.emit()
 
 
+## True when the game was started with any of the test flags (see main.gd).
+func _is_test_run() -> bool:
+	for arg: String in OS.get_cmdline_user_args():
+		for flag: String in ["--bot", "--probe", "--shot", "--selftest"]:
+			if arg.begins_with(flag):
+				return true
+	return false
+
+
 func apply() -> void:
 	var headless := DisplayServer.get_name() == "headless"
-	if not headless:
+	if not headless and _is_test_run():
+		# automated runs: always a small plain window that stays out of the way, whatever is saved
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
+		DisplayServer.window_set_size(Vector2i(1280, 720))
+	elif not headless:
 		match window_mode:
 			1:
 				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)

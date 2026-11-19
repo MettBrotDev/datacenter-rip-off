@@ -19,6 +19,8 @@ var slot := 0
 var pinned := false     # placed deliberately: stays exactly put (no physics) until grabbed or unsupported
 var power_to := 0
 var net_to := 0
+var coolant_to := 0     # what this item's coolant hose is plugged into
+var worn := 0           # heat suit: peer id wearing it
 var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation
 var contains := ""      # parcels: the item kind inside
 var broken := false     # ruined by rain; set through status bit 2 so every peer shows it
@@ -26,9 +28,14 @@ var wet := 0.0          # host only: seconds of rain soaked up so far
 var dead := false       # host only: will be reported as ruined (burnt out, or a dud from the start)
 var burning := false    # host only: on fire; reaches other peers as status bit 3
 var burn := 0.0         # host only: seconds it has been burning
+var cooked := false     # host only: server in thermal shutdown
+var sketchy := false    # host only: second-hand server whose thermal protection is broken
+var draining := false   # host only: pump is sucking its hoses empty
 # generators only (the host simulates these and replicates them twice a second)
-var running := false    # fuel generators: switched on
-var fuel := 0.0         # 0..1 tank level
+var running := false    # fuel generators and pumps: switched on
+var fuel := 0.0         # 0..1 how full: fuel tank, coolant reservoir or bucket
+var hose := 0.0         # 0..1 how full of coolant this item's own hose is
+var heat := 0.0         # degrees C: a server's chips, or the coolant leaving a pump
 var rider := 0          # bike generator: peer id pedalling it
 var load := 0.0         # watts currently drawn from it
 
@@ -36,6 +43,7 @@ var _world: Node3D
 var _leds: Array = []
 var _light: OmniLight3D   # lamps only
 var _fire: Node3D         # flames and their glow, while burning
+var _shell: MeshInstance3D   # heat suit only: the silver shell shown while it is worn
 var _target_pos := Vector3.ZERO
 var _target_rot := Quaternion.IDENTITY
 var _has_target := false
@@ -98,24 +106,52 @@ func _ready() -> void:
 
 
 func is_loose() -> bool:
-	return holder == 0 and parent == 0
+	return holder == 0 and parent == 0 and worn == 0
 
 
 func link(type: String) -> int:
-	return power_to if type == "power" else net_to
+	return power_to if type == "power" else (net_to if type == "net" else coolant_to)
 
 
 func set_link(type: String, to: int) -> void:
-	if type == "power":
-		power_to = to
-	else:
-		net_to = to
+	match type:
+		"power":
+			power_to = to
+		"net":
+			net_to = to
+		_:
+			coolant_to = to
 
 
 ## Where this item's own cable of the given type leaves it (world space).
 func port_pos(type: String) -> Vector3:
 	var size: Vector3 = def["size"]
-	return global_transform * Vector3(size.x * (-0.3 if type == "power" else 0.3), 0, size.z * 0.5)
+	var side: float = {"power": -0.3, "net": 0.3}.get(type, 0.0)
+	return global_transform * Vector3(size.x * side, 0, size.z * 0.5)
+
+
+## Heat suit: show the folded bundle, or a silver shell around whoever wears it.
+func _show_worn() -> void:
+	var on := worn != 0
+	if on and _shell == null:
+		var foil := StandardMaterial3D.new()
+		foil.albedo_color = Color(0.82, 0.84, 0.88, 0.55)
+		foil.metallic = 0.8
+		foil.roughness = 0.25
+		foil.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		var body := CapsuleMesh.new()
+		body.radius = 0.46
+		body.height = 1.75
+		body.material = foil
+		_shell = MeshInstance3D.new()
+		_shell.mesh = body
+		_shell.position.y = 0.875
+		add_child(_shell)
+	for child: Node in get_children():
+		if child is MeshInstance3D:
+			child.visible = (child == _shell) == on
+	if _shell and on:
+		_shell.visible = worn != multiplayer.get_unique_id()   # do not blind the wearer
 
 
 func set_status(bits: int) -> void:
@@ -198,6 +234,7 @@ func _ruin() -> void:
 func release(xf: Transform3D, vel: Vector3, pin := false) -> void:
 	holder = 0
 	parent = 0
+	worn = 0
 	pinned = pin
 	_pin_xf = xf
 	global_transform = xf
@@ -222,14 +259,20 @@ func net_target(pos: Vector3, rot: Quaternion) -> void:
 ## Loose items collide with the world and each other (mask 3), never with players.
 func apply_mode() -> void:
 	_has_target = false
+	if def.get("wear", false):
+		_show_worn()
 	freeze = not is_loose() or pinned or not multiplayer.is_server()
 	var loose_layer := 2 | (16 if def.get("solid", false) else 0)   # 16 = players cannot walk through
-	collision_layer = loose_layer if is_loose() else (4 if holder == 0 else 0)
+	collision_layer = loose_layer if is_loose() else (4 if holder == 0 and worn == 0 else 0)
 	collision_mask = 3 if is_loose() else 0
 
 
 func _process(dt: float) -> void:
-	if holder != 0:
+	if worn != 0:
+		var wearer: Node3D = _world.player(worn)
+		if wearer:
+			global_transform = wearer.global_transform
+	elif holder != 0:
 		var p: Node3D = _world.player(holder)
 		if p:
 			global_transform = p.hand.global_transform

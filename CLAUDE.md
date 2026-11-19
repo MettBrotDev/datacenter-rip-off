@@ -38,10 +38,20 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Internet comes from the garage's wall box and from the router in every house we own.
 - Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
-- Heat: every watt used in a building warms it (`sim._heat_step`); open doors, fans and air conditioners
-  cool it. 40 C servers at half speed, 50 C shutdown, 60 C fires start. Fire ruins items after 6 s,
-  spreads to flammable neighbours, is put out with an extinguisher or by rain.
-- Power strips catch fire above 2000 W. Sprinting across a cable pulls it out. Used parts may be dead on arrival.
+- Heat uses believable numbers. Rooms: every watt used in a building warms its air (`sim._room_step`);
+  doors, fans, air conditioners cool it. Chips (`Item.heat` on servers): about 48 C above the room when
+  busy and air-cooled; throttle at 85, shut down at 100, resume at 80. Consumer GPUs never need more.
+- Liquid cooling (`sim._coolant_step`): `liquid` GPUs have no fans; their server needs a coolant hose
+  (third link type "coolant", key H) to a manifold -> pump -> reservoir (-> garden tap for auto-refill),
+  with a radiator on the same pump, outdoors. Hoses have a fill level (`Item.hose`). Unplugging a full
+  hose makes a puddle; with the pump running it sprays and ruins electronics nearby (`world._unplug`).
+  Pumps can drain their hoses first. Puddles (`world.puddles`) ruin electronics standing in them.
+- People: above 38 C the local player's `exposure` builds up; at 100% they pass out and wake on the
+  driveway. A worn heat suit (`Item.worn`) prevents it and slows walking.
+- Fire comes from causes that make sense: power strips over 2000 W, and used servers whose thermal
+  protection is broken (`Item.sketchy`). It ruins items after 6 s, spreads to flammable neighbours,
+  and is put out with an extinguisher or by rain.
+- Sprinting across a cable or hose pulls it out. Used parts may be dead on arrival.
 - The dumpster beside the driveway (`dumpster.gd`) deletes whatever is inside when its button is pressed.
 - Purchases arrive outside on the driveway as `parcel` items (`Item.contains` = what is inside) and are
   unpacked with Q. Parcels are rainproof.
@@ -77,7 +87,7 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 ## Milestones
 1. DONE — walk around together, carry and throw objects
 2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breakers, money, generators, weather, town, buyable houses. Missing: cooling
-3. STARTED — heat, fire, extinguisher, strip overload, tripping, dead-on-arrival parts. Missing: the real cooling system, leaks, network loops
+3. MOSTLY DONE — heat, liquid cooling, leaks, fire, extinguisher, strip overload, tripping, dud parts, heat suit. Missing: network loops, generator fumes and noise
 4. Company layer: products, AI models, shop, progression, bigger locations
 5. Polish: glow, sound, UI, balance
 

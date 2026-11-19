@@ -3,6 +3,8 @@ extends Node3D
 ## local player is currently carrying. Purely visual; the data lives on the items.
 
 const SEGMENTS := 10
+const HOSE_EMPTY := Color(0.55, 0.57, 0.6)   # a dry hose
+const HOSE_FULL := Color(0.1, 0.45, 1.0)     # one full of coolant
 
 var world: Node3D
 
@@ -20,12 +22,13 @@ func _ready() -> void:
 	_mesh.rings = 0
 	_mats["power"] = _mat(Color(0.07, 0.07, 0.08))
 	_mats["net"] = _mat(Color(0.1, 0.75, 0.35))
+	_mats["coolant"] = _mat(HOSE_EMPTY)
 
 
 func _process(_dt: float) -> void:
 	var seen := {}
 	for it: Node3D in world.items.values():
-		for type: String in ["power", "net"]:
+		for type: String in ["power", "net", "coolant"]:
 			var to: int = it.link(type)
 			var target: Node3D = world.provider(to) if to != 0 else null
 			if target:
@@ -33,6 +36,8 @@ func _process(_dt: float) -> void:
 				seen[key] = true
 				_draw(key, type, it.port_pos(type), _socket_pos(target, it.id))
 				_pool[key]["link"] = [it.id, type]
+				if type == "coolant":   # grey when empty, blue when full
+					_pool[key]["mat"].albedo_color = HOSE_EMPTY.lerp(HOSE_FULL, it.hose)
 	if not world.preview.is_empty():
 		var src: Node3D = world.items.get(world.preview["id"])
 		var me: Node3D = world.player(multiplayer.get_unique_id())
@@ -74,18 +79,21 @@ func _draw(key: String, type: String, a: Vector3, b: Vector3) -> void:
 	if entry.is_empty():
 		var node := Node3D.new()
 		add_child(node)
+		var mat: StandardMaterial3D = _mats[type]
+		if type == "coolant":
+			mat = mat.duplicate()   # every hose has its own colour
 		for i in SEGMENTS:
 			var seg := MeshInstance3D.new()
 			seg.mesh = _mesh
-			seg.material_override = _mats[type]
+			seg.material_override = mat
 			node.add_child(seg)
-		entry = {"node": node, "a": Vector3.INF, "b": Vector3.INF, "points": []}
+		entry = {"node": node, "a": Vector3.INF, "b": Vector3.INF, "points": [], "mat": mat}
 		_pool[key] = entry
 	if entry["a"].is_equal_approx(a) and entry["b"].is_equal_approx(b):
 		return
 	entry["a"] = a
 	entry["b"] = b
-	var radius := 0.014 if type == "power" else 0.01
+	var radius: float = {"power": 0.014, "coolant": 0.022}.get(type, 0.01)
 	var sag := 0.2 + a.distance_to(b) * 0.15
 	var low := minf(0.02, minf(a.y, b.y))
 	var prev := a

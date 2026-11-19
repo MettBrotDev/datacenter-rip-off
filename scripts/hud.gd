@@ -14,6 +14,8 @@ var _values: Dictionary = {}    # stat name -> Label
 var _toasts: VBoxContainer
 var _pause: Control
 var _shop: Control
+var _heat: ColorRect
+var _heat_text: Label
 var _offer: Control
 var _settings: Control
 
@@ -86,7 +88,7 @@ func _ready() -> void:
 	hints.size_flags_vertical = Control.SIZE_SHRINK_END
 	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hints)
-	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power cable   G Network cable   Esc Pause", 14, UI.DIM))
+	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power   G Network   H Coolant   Esc Pause", 14, UI.DIM))
 
 	_shop = Shop.new()
 	_shop.world = get_parent()
@@ -140,6 +142,24 @@ func set_temp(degrees: float) -> void:
 	_values["HERE"].text = "%d °C" % degrees
 	_values["HERE"].add_theme_color_override("font_color",
 			UI.RED if degrees >= 50.0 else (Color(1.0, 0.65, 0.2) if degrees >= 40.0 else UI.TEXT))
+
+
+## 0..1: how close the local player is to passing out from the heat.
+func set_exposure(amount: float) -> void:
+	if _heat == null:
+		_heat = ColorRect.new()
+		_heat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_heat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_heat)
+		move_child(_heat, 0)
+		_heat_text = UI.label("", 22, Color(1.0, 0.8, 0.6))
+		_heat_text.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+		_heat_text.position.y = 120
+		_heat_text.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		_heat_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		add_child(_heat_text)
+	_heat.color = Color(1.0, 0.25, 0.05, amount * 0.4)
+	_heat_text.text = "" if amount < 0.3 else ("You are overheating. Get out." if amount < 0.75 else "You are about to pass out!")
 
 
 func set_weather(index: int) -> void:

@@ -21,6 +21,7 @@ const House = preload("res://scripts/house.gd")
 const Dumpster = preload("res://scripts/dumpster.gd")
 const Town = preload("res://scripts/town.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
+const LINKS := {"power": "power cable", "net": "network cable", "coolant": "coolant hose"}   # link type -> its name
 const GARAGE_CIRCUIT := 1000                  # houses use their own id as circuit id
 # What a neighbour says to an offer, by how close it was to the price they have in mind.
 const HAGGLE := {
@@ -49,6 +50,7 @@ var houses: Dictionary = {}      # house id -> House (0 is the landlady's, next 
 var temps: Dictionary = {}       # circuit id -> degrees C inside that building
 var outside_temp := 20.0
 var cables: Cables
+var puddles: Array = []          # [{"pos", "radius", "left"}] water on the floor
 var doa_chance := 0.12           # host: odds that a used part turns out dead when unpacked
 var door_open := false
 var capacity := 0.0             # watts available right now (grid + running generators)
@@ -132,6 +134,24 @@ func sockets_used(provider_id: int, type: String) -> int:
 		if it.link(type) == provider_id:
 			n += 1
 	return n
+
+
+## The heat suit this player has on, if any.
+func worn_by(peer: int) -> Item:
+	for it: Item in items.values():
+		if it.worn == peer:
+			return it
+	return null
+
+
+## Is this item standing in water?
+func in_puddle(it: Item) -> bool:
+	var pos := it.global_position
+	for puddle: Dictionary in puddles:
+		var at: Vector3 = puddle["pos"]
+		if absf(pos.y - at.y) < 0.4 and Vector2(pos.x - at.x, pos.z - at.z).length() < puddle["radius"]:
+			return true
+	return false
 
 
 ## The bike generator this player is pedalling, if any.
@@ -255,6 +275,25 @@ func request_door() -> void:
 	_to_host(&"_h_door", [])
 
 
+## Pump: suck the water out of every hose on its loop, back into the reservoir.
+func request_drain(id: int) -> void:
+	_to_host(&"_h_drain", [id])
+
+
+## Bucket in hand: fill it at a tap, or pour it into a reservoir.
+func request_bucket(target_id: int) -> void:
+	_to_host(&"_h_bucket", [target_id])
+
+
+func request_unwear() -> void:
+	_to_host(&"_h_unwear", [])
+
+
+## The local player passed out from the heat.
+func request_fainted() -> void:
+	_to_host(&"_h_fainted", [])
+
+
 func request_empty_bin() -> void:
 	_to_host(&"_h_empty_bin", [])
 
@@ -318,7 +357,7 @@ func _owned_ids() -> Array:
 func _spawn_furniture() -> void:
 	for h: House in houses.values():
 		for spot: Array in h.furniture():
-			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true, ""]])
+			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true, "", 0, 0]])
 			_next_id += 1
 
 
@@ -343,6 +382,8 @@ func _reconcile_players() -> void:
 				_cast(&"_r_release", [it.id, it.global_transform, Vector3.ZERO])
 			if it.rider != 0 and not Net.players.has(it.rider):
 				it.rider = 0
+			if it.worn != 0 and not Net.players.has(it.worn):
+				_cast(&"_r_release", [it.id, it.global_transform, Vector3.ZERO])
 	hud.set_players(Net.players)
 
 
@@ -364,7 +405,7 @@ func _spawn_starting_items() -> void:
 
 ## `contains` is only for kind "parcel": the item kind boxed up inside.
 func _spawn(kind: String, xf: Transform3D, contains := "") -> void:
-	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false, contains]])
+	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false, contains, 0, 0]])
 	_next_id += 1
 
 
@@ -386,7 +427,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn])
 	_r_door.rpc_id(peer, door_open)
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
@@ -461,10 +502,14 @@ func _h_attach(parent_id: int) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _h_link(id: int, type: String, provider_id: int) -> void:
-	if not multiplayer.is_server() or type not in ["power", "net"]:
+	if not multiplayer.is_server() or type not in LINKS:
 		return
 	var it: Item = items.get(id)
 	if it == null or not it.def.get(type + "_port", false):
+		return
+	if provider_id == 0:
+		_unplug(it, type, name_of(Net.sender()))
+		_sim_step(0.0)
 		return
 	if provider_id != 0:
 		var target := provider(provider_id)
@@ -527,6 +572,81 @@ func _h_breaker(circuit: int) -> void:
 	_sim_step(0.0)
 
 
+## Host: pull a cable or hose out. A hose with water in it makes a mess, and one under
+## pressure (its pump is running) sprays everything nearby.
+func _unplug(it: Item, type: String, who: String) -> void:
+	if type == "coolant" and it.hose > 0.3:
+		var pump: Item = _sim.pump_for(it, self)
+		var mains: bool = it.def.has("tank") and it.coolant_to < 0
+		var spraying: bool = mains or (pump != null and pump.running and pump.status == 3)
+		var at := it.port_pos("coolant")
+		var floor_hit := get_world_3d().direct_space_state.intersect_ray(
+				PhysicsRayQueryParameters3D.create(at + Vector3.UP * 0.1, at + Vector3.DOWN * 4.0, 1))
+		if floor_hit:
+			at = floor_hit["position"]
+		_cast(&"_r_puddle", [at + Vector3(0, 0.01, 0), 2.2 if spraying else 0.9, 90.0 if spraying else 45.0])
+		if spraying:
+			var soaked := 0
+			for other: Item in items.values():
+				if other.def.get("fragile", false) and not other.broken and not other.dead \
+						and other.global_position.distance_to(it.global_position) < 1.8:
+					other.dead = true
+					soaked += 1
+			var tank: Item = items.get(pump.coolant_to) if pump != null else null
+			if tank != null and tank.def.has("tank"):
+				tank.fuel = maxf(0.0, tank.fuel - 0.25)
+			_cast(&"_r_toast", ["%s pulled a hose off under pressure! Water everywhere, %d %s soaked." % [
+				who, soaked, "thing" if soaked == 1 else "things"]])
+		else:
+			_cast(&"_r_toast", ["%s pulled out a full coolant hose. There is a puddle now." % who])
+	it.hose = 0.0
+	_cast(&"_r_link", [it.id, type, 0])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_drain(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var pump: Item = items.get(id)
+	if pump == null or not pump.def.has("pump") or pump.running:
+		return
+	pump.draining = true
+	_cast(&"_r_toast", ["%s is draining the coolant hoses" % name_of(Net.sender())])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_bucket(target_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var bucket := held_by(Net.sender())
+	var target := provider(target_id)
+	if bucket == null or bucket.kind != "bucket" or target == null:
+		return
+	if target_id < 0 and target.kind == "tap":
+		bucket.fuel = 1.0
+	elif target_id > 0 and target.def.has("tank") and bucket.fuel > 0.0:
+		target.fuel = minf(1.0, target.fuel + 0.34)
+		bucket.fuel = 0.0
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_unwear() -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := Net.sender()
+	var suit := worn_by(peer)
+	var p := player(peer)
+	if suit and p:
+		_cast(&"_r_release", [suit.id, Transform3D(Basis(), p.position - p.transform.basis.z * 0.9 + Vector3(0, 0.3, 0)), Vector3.ZERO])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_fainted() -> void:
+	if multiplayer.is_server():
+		_cast(&"_r_toast", ["%s passed out from the heat and was dragged outside" % name_of(Net.sender())])
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func _h_empty_bin() -> void:
 	if not multiplayer.is_server():
@@ -551,15 +671,15 @@ func _h_empty_bin() -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _h_trip(id: int, type: String) -> void:
-	if not multiplayer.is_server() or type not in ["power", "net"]:
+	if not multiplayer.is_server() or type not in LINKS:
 		return
 	var it: Item = items.get(id)
 	var p := player(Net.sender())
 	if it == null or p == null or it.link(type) == 0 or p.position.distance_to(it.global_position) > Catalog.MAX_CABLE + 2.0:
 		return
-	_cast(&"_r_link", [id, type, 0])
-	_cast(&"_r_toast", ["%s tripped over a %s cable and pulled it out of the %s" % [
-		name_of(Net.sender()), "power" if type == "power" else "network", it.label.to_lower()]])
+	_cast(&"_r_toast", ["%s tripped over a %s and pulled it out of the %s" % [
+		name_of(Net.sender()), LINKS[type], it.label.to_lower()]])
+	_unplug(it, type, name_of(Net.sender()))
 	_sim_step(0.0)
 
 
@@ -590,11 +710,17 @@ func _h_use(id: int) -> void:
 	var peer := Net.sender()
 	var it: Item = items.get(id)
 	var p := player(peer)
-	if it == null or p == null or not it.def.has("gen") or it.holder != 0:
+	if it == null or p == null or it.holder != 0:
 		return
 	if it.rider != peer and p.position.distance_to(it.global_position) > 4.0:
 		return
-	match it.def["gen"]["kind"]:
+	if it.def.has("pump"):
+		it.running = not it.running
+		it.draining = false
+		_cast(&"_r_toast", ["%s switched the coolant pump %s" % [name_of(peer), "on" if it.running else "off"]])
+	elif it.def.get("wear", false) and it.is_loose() and worn_by(peer) == null:
+		_cast(&"_r_wear", [id, peer])
+	match it.def.get("gen", {}).get("kind", ""):
 		"pedal":
 			if it.rider == peer:
 				it.rider = 0
@@ -711,24 +837,28 @@ func _physics_process(dt: float) -> void:
 
 func _sim_step(dt: float) -> void:
 	for it: Item in items.values():   # cables only stretch so far
-		for type: String in ["power", "net"]:
+		for type: String in LINKS:
 			var to := it.link(type)
 			if to == 0:
 				continue
 			var target := provider(to)
 			if target == null or it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
-				_cast(&"_r_link", [it.id, type, 0])
-				_cast(&"_r_toast", ["The %s cable of a %s got yanked out" % [
-					"power" if type == "power" else "network", it.label.to_lower()]])
+				_cast(&"_r_toast", ["The %s of a %s got yanked out" % [LINKS[type], it.label.to_lower()]])
+				_unplug(it, type, "Somebody")
+	for puddle: Dictionary in puddles.duplicate():   # puddles dry up
+		puddle["left"] -= dt
+		if puddle["left"] <= 0.0:
+			puddles.erase(puddle)
 	_drop_unsupported()
 	var events: Array = []
 	var status := _sim.step(self, dt, events)
 	for text: String in events:
 		_cast(&"_r_toast", [text])
-	var gens := {}
+	var gens := {}   # everything with moving parts: generators, pumps, tanks, buckets, servers, hoses
 	for it: Item in items.values():
-		if it.def.has("gen"):
-			gens[it.id] = [it.running, it.fuel, it.rider, it.load]
+		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \
+				or it.def.get("group", "") == "server" or it.coolant_to != 0 or it.hose > 0.0:
+			gens[it.id] = [it.running, it.fuel, it.rider, it.load, it.hose, it.heat]
 	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather,
 		_sim.temps, _sim.outside_temp()], status, gens])
 
@@ -774,12 +904,49 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.power_to = st[3]
 	it.net_to = st[4]
 	it.pinned = st[5]
+	it.coolant_to = st[7]
+	it.worn = st[8]
 	_items.add_child(it)
 	it.global_transform = xf
 	it._pin_xf = xf
 	items[id] = it
 	if multiplayer.is_server():
 		it.sleeping_state_changed.connect(_on_item_sleep.bind(it))
+
+
+## A puddle on the floor: wet electronics standing in it are ruined within a couple of seconds.
+@rpc("authority", "call_remote", "reliable")
+func _r_puddle(pos: Vector3, radius: float, seconds: float) -> void:
+	puddles.append({"pos": pos, "radius": radius, "left": seconds})
+	var disc := CylinderMesh.new()
+	disc.top_radius = radius
+	disc.bottom_radius = radius
+	disc.height = 0.012
+	var water := StandardMaterial3D.new()
+	water.albedo_color = Color(0.25, 0.55, 0.95, 0.55)
+	water.roughness = 0.05
+	water.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	disc.material = water
+	var node := MeshInstance3D.new()
+	node.mesh = disc
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(node)
+	node.global_position = pos
+	node.scale = Vector3(0.2, 1, 0.2)
+	var tween := node.create_tween()
+	tween.tween_property(node, "scale", Vector3.ONE, 0.6)
+	tween.tween_interval(maxf(seconds - 6.0, 0.1))
+	tween.tween_property(node, "scale", Vector3(0.01, 1, 0.01), 5.0)
+	tween.tween_callback(node.queue_free)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_wear(id: int, peer: int) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.worn = peer
+		it.pinned = false
+		it.apply_mode()
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -848,6 +1015,10 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 			it.fuel = gens[id][1]
 			it.rider = gens[id][2]
 			it.load = gens[id][3]
+			it.hose = gens[id][4]
+			it.heat = gens[id][5]
+			if it.kind == "bucket":
+				it.set_status(3 if it.fuel > 0.0 else 0)   # its "light" is the water in it
 	for f: Node3D in fixtures.values():
 		if f.kind == "breaker":
 			f.set_lamp(1 if tripped_circuits.has(f.circuit) else 2)

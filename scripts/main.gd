@@ -33,7 +33,7 @@ func _ready() -> void:
 
 func _setup_input() -> void:
 	var keys := {"fwd": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R, "use": KEY_Q}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R, "use": KEY_Q, "coolant": KEY_H}
 	for action: String in keys:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = keys[action]
@@ -211,16 +211,19 @@ func _selftest() -> void:
 	print("CHECK after 7 s outdoors: ruined=%s parcels still closed=%d" % [ruined, _count("parcel")])
 
 
-	# 8. heat: the garage settles a few degrees above outside; force it hot and watch the servers
+	# 8. chip temperatures: a busy air-cooled server sits about 48 degrees above the room.
+	#    Force its chips hot and watch it throttle, shut down, and come back.
 	var sim: RefCounted = world._sim
 	var garage: int = world.GARAGE_CIRCUIT
-	_check("at %d °C in the garage (outside %d °C)" % [sim.temps[garage], sim.outside_temp()])
-	sim.temps[garage] = 45.0
-	_check("garage forced to 45 °C: half speed")
-	sim.temps[garage] = 55.0
-	_check("garage forced to 55 °C: thermal shutdown")
-	sim.temps[garage] = 30.0
-	_check("garage back to 30 °C")
+	await _run(60.0)
+	_check("garage %d °C, outside %d °C, chips %d °C" % [sim.temps[garage], sim.outside_temp(), server.heat])
+	server.heat = 92.0
+	_check("chips forced to 92 °C: half speed")
+	server.heat = 104.0
+	_check("chips forced to 104 °C: shut down")
+	server.heat = 60.0
+	world._sim_step(0.5)
+	_check("chips back at 60 °C")
 
 	# 9. fire: set the server alight, put it out with an extinguisher
 	await _buy(["extinguisher"])
@@ -258,6 +261,88 @@ func _selftest() -> void:
 		if it.kind == "gpu_1080" and (newest == null or it.id > newest.id):
 			newest = it
 	print("CHECK newly unpacked used GPU: ruined=%s" % newest.broken)
+
+
+	# 13. liquid cooling. An A100 has no fans: on its own it cooks within seconds.
+	world.request_link(strip.id, "power", _by_kind()["outlet"].id)   # plug the strip back in
+	await _buy(["gpu_a100", "pump", "reservoir", "radiator", "manifold", "bucket"])
+	kit = _by_kind()
+	var pump: Node3D = kit["pump"]
+	var tank: Node3D = kit["reservoir"]
+	for step: Array in [["gpu_a100", Vector3(3.0, 0.3, 0.5)], ["pump", Vector3(2.0, 0.2, 3.4)],
+			["reservoir", Vector3(1.2, 0.4, 3.6)], ["manifold", Vector3(3.2, 0.1, 1.6)],
+			["radiator", Vector3(4.2, 0.55, 5.6)]]:
+		me.position = kit[step[0]].global_position + Vector3(0, 0, -1)
+		world.request_grab(kit[step[0]].id)
+		me.position = Vector3(2.5, 0, 4.2)
+		world.request_place(Transform3D(Basis(), step[1]))
+	me.position = Vector3(3.0, 0, 1.5)
+	world.request_grab(kit["gpu_a100"].id)
+	world.request_attach(server.id)
+	await _run(40.0)
+	_check("A100 with no coolant: chips %d °C" % server.heat)
+
+	#     Build the loop: reservoir <- pump <- manifold <- server, radiator outside, three buckets of water.
+	world.request_link(pump.id, "power", _by_kind()["outlet"].id)
+	world.request_link(pump.id, "coolant", tank.id)
+	world.request_link(kit["manifold"].id, "coolant", pump.id)
+	world.request_link(kit["radiator"].id, "coolant", pump.id)
+	world.request_link(server.id, "coolant", kit["manifold"].id)
+	me.position = Vector3(3.0, 0, 5.2)
+	world.request_grab(kit["bucket"].id)
+	for trip in 3:
+		world.request_bucket(-9)
+		world.request_bucket(tank.id)
+	world.request_release(false)
+	world.request_use(pump.id)
+	await _run(120.0)
+	_check("loop running: chips %d °C, coolant %d °C, reservoir %d%%, server hose %d%% full" % [
+		server.heat, pump.heat, tank.fuel * 100.0, server.hose * 100.0])
+
+	#     Pull the server's hose off with the pump running: spray. Then the safe way: pump off, drain, unplug.
+	world.request_link(server.id, "coolant", 0)
+	print("CHECK hose pulled under pressure: puddles=%d server ruined=%s reservoir %d%%" % [
+		world.puddles.size(), server.dead, tank.fuel * 100.0])
+	world.request_use(pump.id)
+	world.request_drain(pump.id)
+	await _run(5.0)
+	var puddles_before: int = world.puddles.size()
+	world.request_link(kit["manifold"].id, "coolant", 0)
+	print("CHECK drained, then unplugged the manifold: its hose was %d%% full, new puddles=%d" % [
+		kit["manifold"].hose * 100.0, world.puddles.size() - puddles_before])
+
+	#     Reservoir hosed to the garden tap stays full.
+	tank.fuel = 0.2
+	world.request_link(tank.id, "coolant", -9)
+	world._sim_step(0.5)
+	print("CHECK reservoir on the tap: %d%% full" % (tank.fuel * 100.0))
+
+	# 14. people: ten minutes' worth of a 60 °C garage, without and with the heat suit
+	await _buy(["suit"])
+	sim.temps[garage] = 60.0
+	world.temps[garage] = 60.0
+	me.position = Vector3(0, 0, 0)
+	me.exposure = 0.0
+	me._feel_heat(20.0)
+	print("CHECK 20 s at 60 °C without a suit: exposure %d%%" % (me.exposure * 100.0))
+	me._feel_heat(20.0)
+	print("CHECK 40 s at 60 °C: now at %.1v (fainted and moved outside if z is 6.5)" % me.position)
+	me.position = _by_kind()["suit"].global_position + Vector3(0, 0, 1)
+	world.request_use(_by_kind()["suit"].id)
+	me.position = Vector3(0, 0, 0)
+	me.exposure = 0.0
+	me._feel_heat(600.0)
+	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
+	me.position = Vector3(0.3, 0, 0.6)   # leave the camera looking at the pump, reservoir and hoses
+	me.rotation.y = -2.67
+	me.head.rotation.x = -0.4
+
+
+## Lets simulated time pass quickly: `seconds` of game time in half-second steps.
+func _run(seconds: float) -> void:
+	for i in int(seconds * 2.0):
+		world._sim_step(0.5)
+	await _wait(0.1)
 
 
 ## Buys things, then walks to the driveway and unpacks every parcel there.

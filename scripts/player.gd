@@ -10,14 +10,17 @@ const SPRINT := 6.5
 const JUMP := 4.6
 const GRAVITY := 13.0
 const SENS := 0.0022
-const KEYS := {"power": "F", "net": "G"}
-const WORDS := {"power": "power", "net": "network"}
+const KEYS := {"power": "F", "net": "G", "coolant": "H"}
+const WORDS := {"power": "power cable", "net": "network cable", "coolant": "coolant hose"}
+const HEAT_SAFE := 38.0       # room temperature a person can take indefinitely
+const HEAT_SCALE := 600.0     # degree-seconds above that before passing out (45 C: about 85 s)
 
 var peer_id := 1
 var is_local := false
 var head: Node3D          # pitch pivot at eye height
 var hand: Marker3D        # where a carried item sits
 var velocity_estimate := Vector3.ZERO
+var exposure := 0.0       # local player only: 0..1 towards passing out from the heat
 
 var _world: Node3D
 var _blob: Node3D
@@ -171,7 +174,9 @@ func _move(dt: float) -> void:
 		position = bike.global_position + Vector3(0, 0.1, 0)
 		velocity = Vector3.ZERO
 		return
-	var speed := WALK
+	_feel_heat(dt)
+	var suited: bool = _world.worn_by(peer_id) != null
+	var speed := WALK * (0.75 if suited else 1.0)
 	if Net.bot:
 		_bot(dt)
 		dir = -transform.basis.z
@@ -179,7 +184,7 @@ func _move(dt: float) -> void:
 		var i := Input.get_vector("left", "right", "fwd", "back")
 		dir = (transform.basis * Vector3(i.x, 0, i.y)).normalized()
 		if Input.is_action_pressed("sprint"):
-			speed = SPRINT
+			speed = SPRINT * (0.75 if suited else 1.0)
 	# Running across a cable on the floor yanks it out. Walking is always safe.
 	_stumble -= dt
 	_trip_wait -= dt
@@ -199,6 +204,24 @@ func _move(dt: float) -> void:
 	elif active and Input.is_action_just_pressed("jump"):
 		velocity.y = JUMP
 	move_and_slide()
+
+
+## Hot rooms wear you down. Without a heat suit you eventually pass out and wake up outside.
+func _feel_heat(dt: float) -> void:
+	var room: float = _world.temp_at(position)
+	if room > HEAT_SAFE and _world.worn_by(peer_id) == null:
+		exposure += dt * (room - HEAT_SAFE) / HEAT_SCALE
+	else:
+		exposure = maxf(0.0, exposure - dt / 20.0)
+	if exposure >= 1.0:
+		exposure = 0.4
+		if _world.held_by(peer_id):
+			_world.request_release(false)
+		_set_cable({})
+		position = Vector3(randf_range(-1.5, 1.5), 0.1, 6.5)   # the driveway
+		velocity = Vector3.ZERO
+		_world.request_fainted()
+	_world.hud.set_exposure(exposure)
 
 
 func _bot(dt: float) -> void:
@@ -246,12 +269,16 @@ func _update_actions() -> void:
 			else:
 				acts.append(["", "%s is full" % t.label, Callable()])
 		else:
-			acts.append(["", "Holding a %s cable. Find somewhere to plug it in." % WORDS[type], Callable()])
+			acts.append(["", "Holding a %s. Find somewhere to plug it in." % WORDS[type], Callable()])
 		acts.append([type, "[%s] Let go" % KEYS[type], _set_cable.bind({})])
 	elif held:
 		if held.kind == "fuel" and t is RigidBody3D and t.def.get("gen", {}).get("kind", "") == "fuel":
 			acts.append(["interact", "[E] Refuel %s (%d%% full)" % [t.label.to_lower(), t.fuel * 100.0],
 					_world.request_refuel.bind(t.id)])
+		elif held.kind == "bucket" and t and t.get("kind") == "tap":
+			acts.append(["interact", "[E] Fill the bucket", _world.request_bucket.bind(t.id)])
+		elif held.kind == "bucket" and held.fuel > 0.0 and t is RigidBody3D and t.def.has("tank"):
+			acts.append(["interact", "[E] Pour into the reservoir (%d%% full)" % (t.fuel * 100.0), _world.request_bucket.bind(t.id)])
 		elif t is RigidBody3D and _world.can_attach(held, t):
 			acts.append(["interact", "[E] Mount on %s" % t.label.to_lower(), _world.request_attach.bind(t.id)])
 		else:
@@ -270,16 +297,31 @@ func _update_actions() -> void:
 			acts.append(["", "ON FIRE. Get a fire extinguisher!", Callable()])
 		acts.append(["interact", "[E] %s %s" % ["Pull out" if t.parent != 0 else "Pick up", t.label.to_lower()],
 				_world.request_grab.bind(t.id)])
-		for type: String in ["power", "net"]:
+		for type: String in ["power", "net", "coolant"]:
 			if not t.def.get(type + "_port", false):
 				continue
 			if t.link(type) != 0:
-				acts.append([type, "[%s] Unplug %s" % [KEYS[type], WORDS[type]], _world.request_link.bind(t.id, type, 0)])
+				var warning := "  (FULL: it will spill!)" if type == "coolant" and t.hose > 0.3 else ""
+				acts.append([type, "[%s] Unplug %s%s" % [KEYS[type], WORDS[type], warning], _world.request_link.bind(t.id, type, 0)])
 			else:
-				acts.append([type, "[%s] Grab %s cable" % [KEYS[type], WORDS[type]],
+				acts.append([type, "[%s] Grab %s" % [KEYS[type], WORDS[type]],
 						_set_cable.bind({"id": t.id, "type": type})])
 		if t.kind == "parcel":
 			acts.append(["use", "[Q] Unpack", _world.request_unpack.bind(t.id)])
+		if t.def.get("wear", false) and _world.worn_by(peer_id) == null:
+			acts.append(["use", "[Q] Put on the heat suit", _world.request_use.bind(t.id)])
+		if t.def.has("pump"):
+			acts.append(["use", "[Q] Switch the pump %s" % ("off" if t.running else "on"), _world.request_use.bind(t.id)])
+			if not t.running:
+				acts.append(["rotate", "[R] Drain the hoses back into the reservoir", _world.request_drain.bind(t.id)])
+			acts.append(["", "Coolant at %d °C%s" % [t.heat, "" if t.status == 3 else ("   not moving" if t.running else "")], Callable()])
+		if t.def.has("tank"):
+			acts.append(["", "Reservoir %d%% full%s" % [ceilf(t.fuel * 100.0),
+					"   kept full by the tap" if t.coolant_to < 0 else "   (bucket, or hose it to a tap)"], Callable()])
+		if t.kind == "bucket":
+			acts.append(["", "Full of water" if t.fuel > 0.0 else "Empty: fill it at a garden tap", Callable()])
+		if t.def.get("group", "") == "server":
+			acts.append(["", "Chips at %d °C%s" % [t.heat, "   THROTTLING" if t.heat >= 85.0 else ""], Callable()])
 		if t.broken:
 			acts.append(["", "Water damage. It will never work again.", Callable()])
 		if t.def.has("gen"):
@@ -322,6 +364,12 @@ func _update_actions() -> void:
 					acts.append(["", "Breaker box: this building's wiring carries up to %d W.\nIt has no power of its own: cable a power inlet to a generator." % limit, Callable()])
 			_:
 				acts.append(["", "%s: %d/%d sockets used" % [t.label, _world.sockets_used(t.id, t.provides), t.sockets], Callable()])
+	if _world.worn_by(peer_id) != null:   # Q takes the suit off unless Q already does something here
+		var busy := false
+		for act: Array in acts:
+			busy = busy or act[0] == "use"
+		if not busy:
+			acts.append(["use", "[Q] Take off the heat suit", _world.request_unwear])
 	_acts = acts
 	var lines: Array[String] = []
 	for act: Array in acts:

@@ -38,6 +38,11 @@ const KINDS := {
 		[Vector3(0.32, 0.42, 0.01), Vector3(0, 0, 0.032), Color(0.96, 0.94, 0.85), 0.0],
 		[Vector3(0.08, 0.08, 0.01), Vector3(0.09, -0.13, 0.038), Color(0.85, 0.15, 0.12), 0.0],
 	]},
+	"tap": {"label": "Garden tap", "provides": "coolant", "sockets": 2, "size": Vector3(0.2, 0.24, 0.16), "parts": [
+		[Vector3(0.06, 0.06, 0.12), Vector3(0, 0, 0.06), Color(0.7, 0.55, 0.25), 0.0],
+		[Vector3(0.05, 0.12, 0.05), Vector3(0, -0.06, 0.12), Color(0.7, 0.55, 0.25), 0.0],
+		[Vector3(0.14, 0.03, 0.03), Vector3(0, 0.06, 0.1), Color(0.2, 0.45, 0.9), 0.0],
+	]},
 	"bin": {"label": "Dumpster button", "provides": "", "sockets": 0, "size": Vector3(0.22, 0.22, 0.09), "parts": [
 		[Vector3(0.22, 0.22, 0.04), Vector3(0, 0, 0.02), Color(0.75, 0.76, 0.78), 0.0],
 		[Vector3(0.12, 0.12, 0.05), Vector3(0, 0, 0.055), Color(1.0, 0.15, 0.1), 2.0],

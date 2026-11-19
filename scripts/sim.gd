@@ -1,5 +1,5 @@
 extends RefCounted
-## Host-only simulation of power, network, heat, fire and money. Runs twice a second.
+## Host-only simulation of power, network, heat, cooling, fire and money. Runs twice a second.
 ## Rule: nothing is ever forbidden when you build it — this is where the consequences happen.
 ##
 ## POWER. There is no electricity grid. All power comes from generators (catalog `gen`):
@@ -11,21 +11,35 @@ extends RefCounted
 ## onto the others on the next step. Power strips carry only so much before they catch fire.
 ## Root keys: a generator is its item id (> 0); building circuit c is -(c + 1).
 ##
-## HEAT. Every watt used inside a building heats it. Heat leaks out faster through an open door
-## and with fans; an air conditioner removes it outright. Hot rooms throttle servers, hotter
-## rooms shut them down, and past that things start to burn.
+## HEAT. Temperatures are meant to be believable. Every watt used inside a building warms its
+## air; doors, fans and air conditioners cool it. A busy air-cooled chip sits about 48 degrees
+## above the room, throttles at 85 and shuts down at 100. Consumer cards are fine in any
+## sensible room. Datacenter cards (`liquid`) have no fans: their server needs coolant.
+##
+## COOLANT. Hoses form a chain like cables: server -> manifold -> pump -> reservoir (-> tap).
+## A loop flows while its pump is on, powered and has water. Radiators on the loop shed the
+## heat into the air around them, so they belong outdoors. Hoses fill up when water flows and
+## stay full until the pump drains them.
 
 const Catalog = preload("res://scripts/catalog.gd")
-const OVERLOAD_STEPS := 3    # 1.5 s over the limit before something gives
-const LEAK := 120.0          # watts a closed building loses per degree above outside
-const HEAT_TIME := 45.0      # seconds for a room to get most of the way to its new temperature
-const THROTTLE_AT := 40.0    # servers at half speed
-const SHUTDOWN_AT := 50.0    # servers switch themselves off...
-const RESUME_AT := 42.0      # ...until it is this cool again
-const FIRE_AT := 60.0        # something in the room may catch fire
-const BURN_RUINS := 6.0      # seconds on fire before an item is ruined
-const BURN_OUT := 22.0       # seconds until a fire dies down by itself
-const SPREAD_RANGE := 1.3    # metres a fire can jump
+const OVERLOAD_STEPS := 3      # 1.5 s over the limit before something gives
+const LEAK := 120.0            # watts a closed building loses per degree above outside
+const ROOM_TIME := 45.0        # seconds for a room to get most of the way to a new temperature
+const CHIP_TIME := 12.0        # ...and for a chip
+const COOLANT_TIME := 30.0     # ...and for the coolant in a loop
+const CHIP_RISE_IDLE := 12.0   # degrees a chip sits above the room when doing nothing
+const CHIP_RISE_CPU := 30.0    # ...a busy server with no GPUs
+const CHIP_RISE_AIR := 48.0    # ...a busy server with air-cooled GPUs
+const CHIP_RISE_LIQUID := 25.0 # degrees a liquid-cooled chip sits above its coolant
+const CHIP_RISE_DRY := 110.0   # a fanless card with no coolant moving: far too much
+const CHIP_THROTTLE := 85.0    # half speed
+const CHIP_SHUTDOWN := 100.0   # switches itself off...
+const CHIP_RESUME := 80.0      # ...until it is this cool again
+const CHIP_IGNITE := 110.0     # hardware whose protection is broken keeps going, then burns
+const EVAPORATION := 0.0011    # share of a reservoir lost per second while its loop runs
+const BURN_RUINS := 6.0        # seconds on fire before an item is ruined
+const BURN_OUT := 22.0         # seconds until a fire dies down by itself
+const SPREAD_RANGE := 1.3      # metres a fire can jump
 
 var money := Catalog.START_MONEY
 var tokens := 0.0       # tokens per second being produced
@@ -35,11 +49,11 @@ var profit := 0.0       # $ per second
 var tripped: Dictionary = {}   # circuit id -> true while its breaker is off
 var weather := 0        # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
-var temps: Dictionary = {}     # circuit id -> degrees C inside that building
+var temps: Dictionary = {}     # circuit id -> degrees C of the air inside that building
 
 var _over: Dictionary = {}     # root key or strip id -> consecutive steps above its limit
-var _cooked: Dictionary = {}   # circuit id -> true while in thermal shutdown
-var _warned: Dictionary = {}   # circuit id -> highest heat warning already announced
+var _said: Dictionary = {}     # message key -> clock time it was last announced
+var _clock := 0.0
 
 
 func reset_breaker(circuit: int) -> void:
@@ -57,9 +71,22 @@ func ignite(it: Node3D) -> void:
 		it.burn = 0.0
 
 
+## The pump pressurising this item's coolant hose, or null. A pump or reservoir answers for itself.
+func pump_for(it: Node3D, world: Node3D) -> Node3D:
+	if it.def.has("pump"):
+		return it
+	if it.def.has("tank"):
+		for other: Node3D in world.items.values():
+			if other.def.has("pump") and other.coolant_to == it.id:
+				return other
+		return null
+	return world.items.get(_pump(it, world))
+
+
 ## Advances the simulation. Returns {item id: status bits}; appends messages for players to `events`.
 func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	var items: Dictionary = world.items
+	_clock += dt
 	weather_left -= dt
 	if weather_left <= 0.0:
 		var roll := randf()
@@ -70,7 +97,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	var sun: float = Catalog.WEATHER[weather]["solar"]
 	var raining: bool = Catalog.WEATHER[weather].get("rain", false)
 
-	# what is ruined: rained-on electronics, burnt things, used parts that never worked
+	# what is ruined: wet electronics (rain, puddles), burnt things, used parts that never worked
 	var ruined := {}
 	for it: Node3D in items.values():
 		var outdoors: bool = world.is_outdoors(it.global_position)
@@ -83,11 +110,12 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if it.broken or it.dead:
 			ruined[it.id] = true
 		elif it.def.get("fragile", false):
-			if raining and outdoors:
-				it.wet += dt
+			var soaking: float = (1.0 if raining and outdoors else 0.0) + (3.0 if world.in_puddle(it) else 0.0)
+			if soaking > 0.0:
+				it.wet += dt * soaking
 				if it.wet >= Catalog.RAIN_GRACE:
 					ruined[it.id] = true
-					events.append("A %s got rained on. It is ruined." % it.label.to_lower())
+					events.append("A %s got soaked. It is ruined." % it.label.to_lower())
 			else:
 				it.wet = maxf(0.0, it.wet - dt)
 	_spread_fire(items, dt)
@@ -198,18 +226,40 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 			alive = alive or not dead.has(g)
 		if not alive:
 			dead[-(c + 1)] = true
-
-	# who has power, what is being served, and the heat it leaves in each building
 	var powered := {}
-	var heat := {}      # circuit id -> watts of heat
-	var cooling := {}   # circuit id -> [extra leak in W per degree, watts removed outright]
-	watts = 0.0
 	for id: int in root:
 		powered[id] = root[id] != 0 and not dead.has(root[id])
+
+	# coolant loops: which pump everything hangs off, and whether water is moving
+	var pump_of := {}   # item id -> pump item id (0 = not on a loop)
+	var flowing := {}   # pump id -> true
+	var gpus := {}      # server id -> [GPUs mounted on it that still work]
+	for it: Node3D in items.values():
+		if it.def.get("coolant_port", false) and not it.def.has("pump") and not it.def.has("tank"):
+			pump_of[it.id] = _pump(it, world)
+		if it.parent != 0 and it.def.get("group", "") == "gpu" and not ruined.has(it.id):
+			if not gpus.has(it.parent):
+				gpus[it.parent] = []
+			gpus[it.parent].append(it)
+	for pump: Node3D in items.values():
+		if pump.def.has("pump"):
+			var tank := _tank(pump, world)
+			var water: bool = pump.coolant_to < 0 or (tank != null and tank.fuel > 0.0)
+			flowing[pump.id] = pump.running and powered[pump.id] and water and not ruined.has(pump.id)
+
+	# what is being served, and where its heat goes: into a coolant loop or into the room
+	var heat := {}      # circuit id -> watts of heat into that building's air
+	var cooling := {}   # circuit id -> [extra leak in W per degree, watts removed outright]
+	var into := {}      # pump id -> watts of heat into its coolant
+	watts = 0.0
 	for it: Node3D in items.values():
 		var c: int = world.circuit_at(it.global_position)
 		var draw: float = it.def.get("watts", 0.0) if powered.get(_feeder(it, ruined), false) else 0.0
 		watts += draw
+		var p: int = pump_of.get(it.parent, 0)
+		if draw > 0.0 and it.def.get("liquid", false) and flowing.get(p, false):
+			into[p] = into.get(p, 0.0) + draw
+			continue
 		if c < 0:
 			continue
 		var warmth := draw
@@ -222,11 +272,12 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 			var cool: Dictionary = it.def["cool"]
 			var sofar: Array = cooling.get(c, [0.0, 0.0])
 			cooling[c] = [sofar[0] + cool.get("vent", 0.0), sofar[1] + cool.get("remove", 0.0)]
-	_heat_step(world, circuits, heat, cooling, dt, events)
+	_coolant_step(world, pump_of, flowing, into, heat, dt, events)
+	_room_step(world, circuits, heat, cooling, dt, events)
+	_chip_step(world, powered, ruined, pump_of, flowing, gpus, dt, events)
 
 	var status := {}
 	var running := {}
-	var speed := {}     # server id -> share of full speed (heat throttling)
 	for it: Node3D in items.values():
 		var bits := 0
 		if it.def.has("gen"):
@@ -236,27 +287,24 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		elif it.def.get("bus", false):
 			var c: int = world.circuit_at(it.global_position)
 			bits = 3 if c >= 0 and circuits.has(c) and not dead.has(-(c + 1)) else 0
+		elif it.def.has("pump"):
+			bits = 3 if flowing[it.id] else int(powered[it.id])
 		elif it.def.get("net_port", false):
-			var c: int = world.circuit_at(it.global_position)
-			var hot: float = temps.get(c, 0.0)
-			var online: bool = powered[it.id] and _reaches_net(it, world, powered)
-			if it.def.get("group", "") == "server" and _cooked.has(c):
-				online = false   # thermal shutdown: powered, but refusing to work
+			var online: bool = powered[it.id] and not it.cooked and _reaches_net(it, world, powered)
 			bits = int(powered[it.id]) | (int(online) << 1)
 			running[it.id] = online
-			speed[it.id] = 0.5 if hot >= THROTTLE_AT else 1.0
 		elif powered[it.id]:
 			bits = 3
 		status[it.id] = bits
 
 	tokens = 0.0
 	for it: Node3D in items.values():
-		var group: String = it.def.get("group", "")
-		if group == "server" and running.get(it.id, false):
-			tokens += it.def.get("tokens", 0.0) * speed[it.id]
-		elif group == "gpu" and it.parent != 0 and running.get(it.parent, false) and not ruined.has(it.id):
-			tokens += it.def.get("tokens", 0.0) * speed[it.parent]
-			status[it.id] = 3
+		if it.def.get("group", "") == "server" and running.get(it.id, false):
+			var speed := 0.5 if it.heat >= CHIP_THROTTLE else 1.0
+			tokens += it.def.get("tokens", 0.0) * speed
+			for gpu: Node3D in gpus.get(it.id, []):
+				tokens += gpu.def.get("tokens", 0.0) * speed
+				status[gpu.id] = 3
 	for id: int in ruined:
 		status[id] = 4
 	for it: Node3D in items.values():
@@ -268,9 +316,72 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	return status
 
 
-## Moves every building's temperature towards where its heat and cooling would settle,
-## and reacts to rooms that got too hot.
-func _heat_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: Dictionary,
+## Each loop's coolant warms with the heat going into it and cools through its radiators.
+## Also fills and drains hoses and uses up the reservoir.
+func _coolant_step(world: Node3D, pump_of: Dictionary, flowing: Dictionary, into: Dictionary,
+		heat: Dictionary, dt: float, events: Array) -> void:
+	var outside := outside_temp()
+	var weather_boost: float = Catalog.WEATHER[weather]["cooling"]
+	for pump: Node3D in world.items.values():
+		if not pump.def.has("pump"):
+			continue
+		if pump.heat == 0.0:
+			pump.heat = outside
+		var tank := _tank(pump, world)
+		if tank != null and tank.coolant_to < 0:
+			tank.fuel = 1.0      # plumbed to the tap: tops itself up
+			tank.hose = 1.0      # and that hose is always under mains pressure
+		var members: Array = []
+		for it: Node3D in world.items.values():
+			if pump_of.get(it.id, 0) == pump.id:
+				members.append(it)
+		if flowing[pump.id]:
+			var shed := 0.0        # watts per degree all radiators manage together
+			var air := 0.0         # the air they shed into, weighted
+			var indoors := []      # [circuit id, watts per degree, air temperature there]
+			for it: Node3D in members:
+				if it.def.has("radiator"):
+					var c: int = world.circuit_at(it.global_position)
+					var inside: bool = c >= 0 and not world.is_outdoors(it.global_position)
+					var per_degree: float = it.def["radiator"] * (1.0 if inside else weather_boost)
+					var around: float = temps.get(c, outside) if inside else outside
+					shed += per_degree
+					air += per_degree * around
+					if inside:
+						indoors.append([c, per_degree, around])
+			var target: float = (air + into.get(pump.id, 0.0)) / shed if shed > 0.0 else 160.0
+			pump.heat += (target - pump.heat) * (1.0 - exp(-dt / COOLANT_TIME))
+			for entry: Array in indoors:   # a radiator indoors just heats the room it is in
+				heat[entry[0]] = heat.get(entry[0], 0.0) + maxf(0.0, entry[1] * (pump.heat - entry[2]))
+			var boiling: bool = pump.heat >= 100.0
+			if tank != null and tank.coolant_to >= 0:
+				tank.fuel = maxf(0.0, tank.fuel - EVAPORATION * dt * (8.0 if boiling else 1.0))
+				if tank.fuel <= 0.0:
+					_say(events, "dry%d" % pump.id, "A coolant reservoir has run dry. The pump is moving nothing.")
+			if boiling:
+				_say(events, "boil%d" % pump.id, "The coolant is boiling: that loop has no working radiator.")
+			pump.draining = false
+		else:
+			pump.heat += (outside - pump.heat) * (1.0 - exp(-dt / 120.0))
+		# hoses fill while water moves, empty while the pump drains them, otherwise stay as they are
+		var hoses: Array = members.duplicate()
+		hoses.append(pump)
+		var emptied := true
+		for it: Node3D in hoses:
+			if it.coolant_to == 0:
+				it.hose = 0.0
+			elif flowing[pump.id]:
+				it.hose = minf(1.0, it.hose + dt * 0.5)
+			elif pump.draining:
+				it.hose = maxf(0.0, it.hose - dt * 0.5)
+			emptied = emptied and it.hose <= 0.0
+		if pump.draining and emptied and dt > 0.0:
+			pump.draining = false
+			events.append("The hoses on that coolant loop are empty. Safe to unplug.")
+
+
+## Moves every building's air temperature towards where its heat and cooling would settle.
+func _room_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: Dictionary,
 		dt: float, events: Array) -> void:
 	var outside := outside_temp()
 	for c: int in circuits:
@@ -278,30 +389,54 @@ func _heat_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: 
 		var leak: float = LEAK * world.vent_factor(c) + cool[0]
 		var target: float = maxf(outside + (heat.get(c, 0.0) - cool[1]) / leak, outside - 6.0)
 		var now: float = temps.get(c, outside)
-		now += (target - now) * (1.0 - exp(-dt / HEAT_TIME))
+		now += (target - now) * (1.0 - exp(-dt / ROOM_TIME))
 		temps[c] = now
-		var where: String = circuits[c][1]
-		if now >= SHUTDOWN_AT:
-			_cooked[c] = true
-		elif now < RESUME_AT:
-			_cooked.erase(c)
-		var level := 3 if now >= FIRE_AT else (2 if now >= SHUTDOWN_AT else (1 if now >= THROTTLE_AT else 0))
-		if level > _warned.get(c, 0):
-			events.append([
-				"It is %d °C in %s. Servers are running at half speed." % [now, where],
-				"It is %d °C in %s. Servers have shut themselves down." % [now, where],
-				"It is %d °C in %s. Things are about to catch fire." % [now, where]][level - 1])
-		if level < _warned.get(c, 0) and now < RESUME_AT - 2.0 or level > _warned.get(c, 0):
-			_warned[c] = level
-		if now >= FIRE_AT and dt > 0.0 and randf() < 0.2:   # the hottest thing in there goes up
-			var fuel: Array = []
-			for it: Node3D in world.items.values():
-				if it.def.get("fragile", false) and not it.burning and world.circuit_at(it.global_position) == c:
-					fuel.append(it)
-			if not fuel.is_empty():
-				var victim: Node3D = fuel[randi() % fuel.size()]
-				ignite(victim)
-				events.append("A %s in %s caught fire!" % [victim.label.to_lower(), where])
+		if now >= 45.0:
+			_say(events, "room%d" % c, "It is %d °C in %s. Nobody should stay in there for long." % [now, circuits[c][1]])
+
+
+## Chip temperature of every server, and what it does about it.
+func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of: Dictionary,
+		flowing: Dictionary, gpus: Dictionary, dt: float, events: Array) -> void:
+	var outside := outside_temp()
+	for it: Node3D in world.items.values():
+		if it.def.get("group", "") != "server":
+			continue
+		var c: int = world.circuit_at(it.global_position)
+		var room: float = temps.get(c, outside) if c >= 0 and not world.is_outdoors(it.global_position) else outside
+		if it.heat == 0.0:
+			it.heat = room
+		var target := room
+		if powered[it.id] and not ruined.has(it.id):
+			target = room + CHIP_RISE_IDLE
+			if not it.cooked:
+				var cards: Array = gpus.get(it.id, [])
+				var fanless := false
+				for gpu: Node3D in cards:
+					fanless = fanless or gpu.def.get("liquid", false)
+				var p: int = pump_of.get(it.id, 0)
+				if fanless and flowing.get(p, false):
+					target = world.items[p].heat + CHIP_RISE_LIQUID
+				elif fanless:
+					target = room + CHIP_RISE_DRY
+				else:
+					target = room + (CHIP_RISE_CPU if cards.is_empty() else CHIP_RISE_AIR)
+		it.heat += (target - it.heat) * (1.0 - exp(-dt / CHIP_TIME))
+		if it.heat >= CHIP_IGNITE and it.sketchy and not it.burning and not ruined.has(it.id):
+			ignite(it)
+			events.append("A used server hit %d °C, ignored it, and caught fire!" % it.heat)
+		elif it.heat >= CHIP_SHUTDOWN and not it.sketchy and not it.cooked:
+			it.cooked = true
+			_say(events, "hot%d" % it.id, "A server hit %d °C and shut itself down." % it.heat)
+		elif it.heat < CHIP_RESUME:
+			it.cooked = false
+
+
+## Announces something at most once a minute per key.
+func _say(events: Array, key: String, text: String) -> void:
+	if _clock - _said.get(key, -1000.0) >= 60.0:
+		_said[key] = _clock
+		events.append(text)
 
 
 ## Fire jumps to anything flammable close by.
@@ -369,6 +504,25 @@ func _source(it: Node3D, world: Node3D, limit: Dictionary, via_sockets: bool, ru
 		path.append(next.id)
 		cur = next
 	return 0
+
+
+## Follows a coolant hose chain through manifolds to the pump at the end. 0 if there is none.
+func _pump(it: Node3D, world: Node3D) -> int:
+	var cur := it
+	for hop in 16:
+		var next: Node3D = world.items.get(cur.coolant_to) if cur.coolant_to > 0 else null
+		if next == null or next.provides != "coolant" or next.def.has("tank"):
+			return 0
+		if next.def.has("pump"):
+			return next.id
+		cur = next
+	return 0
+
+
+## The reservoir a pump draws from, or null (no hose, or plugged straight into a tap).
+func _tank(pump: Node3D, world: Node3D) -> Node3D:
+	var tank: Node3D = world.items.get(pump.coolant_to) if pump.coolant_to > 0 else null
+	return tank if tank != null and tank.def.has("tank") else null
 
 
 ## Follows a network cable chain to an uplink fixture. Unpowered switches pass nothing on.

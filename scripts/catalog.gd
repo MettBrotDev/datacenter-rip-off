@@ -10,6 +10,12 @@ extends RefCounted
 ##   bus         a wall socket: delivers power from the wiring of the building it is in
 ##   wall        can be mounted on walls as well as put on floors
 ##   light       shines while powered
+##   liquid      a GPU with no fans: the server it sits on must be on a running coolant loop
+##   coolant_port  has a coolant hose (servers, manifolds, radiators, pumps, reservoirs)
+##   pump        drives a coolant loop; its own hose goes to a reservoir (or straight to a tap)
+##   tank        a coolant reservoir; its own hose can go to a tap, which keeps it full
+##   radiator    watts it sheds per degree its coolant is above the surrounding air
+##   wear        Q puts it on
 ##   used        second-hand: may turn out to be dead when unpacked
 ##   max_watts   power strips: more than this through them for 1.5 s and they catch fire
 ##   cool        {"vent": extra W per degree the room loses} or {"remove": W of heat taken out}; needs power
@@ -29,15 +35,16 @@ const TOKEN_PRICE := 0.25        # $ earned per token
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
-const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack",
+const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100",
+	"powerstrip", "switch", "rack", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
 	"fan", "aircon", "extinguisher", "crate"]
 
 ## Weather states. `solar` scales what a solar panel can deliver.
 const WEATHER: Array[Dictionary] = [
-	{"name": "Sunny", "solar": 1.0, "temp": 26.0, "news": "The sun is out: solar panels at full power"},
-	{"name": "Cloudy", "solar": 0.4, "temp": 20.0, "news": "Clouds are rolling in: solar panels down to 40%"},
-	{"name": "Rain", "solar": 0.0, "rain": true, "temp": 14.0,
+	{"name": "Sunny", "solar": 1.0, "temp": 26.0, "cooling": 0.8, "news": "The sun is out: solar panels at full power"},
+	{"name": "Cloudy", "solar": 0.4, "temp": 20.0, "cooling": 1.0, "news": "Clouds are rolling in: solar panels down to 40%"},
+	{"name": "Rain", "solar": 0.0, "rain": true, "temp": 14.0, "cooling": 1.3,
 		"news": "It's raining: solar panels produce nothing, and electronics left outside will be ruined"},
 ]
 
@@ -55,6 +62,19 @@ static func _gpu(label: String, price: int, tokens: float, watts: float, glow: C
 		]}
 
 
+## Datacenter cards: no fans of their own, a copper cold plate instead.
+static func _liquid(gpu: Dictionary) -> Dictionary:
+	gpu["liquid"] = true
+	gpu["parts"] = [
+		[Vector3(0.3, 0.05, 0.13), Vector3.ZERO, Color(0.16, 0.16, 0.19), 0.0],
+		[Vector3(0.22, 0.014, 0.1), Vector3(-0.02, 0.028, 0), Color(0.8, 0.5, 0.25), 0.0],
+		[Vector3(0.3, 0.012, 0.012), Vector3(0, 0.026, 0.06), gpu["parts"][1][2], 2.5, "led"],
+		[Vector3(0.03, 0.03, 0.03), Vector3(0.13, 0.03, -0.03), Color(0.2, 0.45, 0.9), 0.0],
+		[Vector3(0.03, 0.03, 0.03), Vector3(0.13, 0.03, 0.02), Color(0.2, 0.45, 0.9), 0.0],
+	]
+	return gpu
+
+
 static func _build() -> Dictionary:
 	var dark := Color(0.1, 0.1, 0.13)
 	var socket := Color(0.15, 0.15, 0.17)
@@ -65,7 +85,7 @@ static func _build() -> Dictionary:
 			[Vector3(0.46, 0.01, 0.07), Vector3(0, 0.172, 0), Color(0.86, 0.79, 0.62), 0.0],
 		]},
 		"server": {"label": "Used server", "group": "server", "price": 300, "tokens": 1.0, "watts": 80.0, "fragile": true,
-			"used": true,
+			"used": true, "coolant_port": true,
 			"power_port": true, "net_port": true,
 			"slots": {"accepts": "gpu", "yaw": 90.0, "at": [Vector3(-0.12, 0.086, 0), Vector3(0.12, 0.086, 0)]},
 			"size": Vector3(0.48, 0.12, 0.6), "mass": 6.0, "parts": [
@@ -76,6 +96,8 @@ static func _build() -> Dictionary:
 		"gpu_1080": _gpu("GTX 1080 (used)", 400, 3.0, 180.0, Color(0.2, 1.0, 0.5)),
 		"gpu_4070": _gpu("RTX 4070", 1200, 6.0, 200.0, Color(0.2, 0.8, 1.0)),
 		"gpu_4090": _gpu("RTX 4090", 3500, 14.0, 450.0, Color(1.0, 0.3, 0.6)),
+		"gpu_a100": _liquid(_gpu("A100 80GB", 9000, 30.0, 400.0, Color(0.6, 1.0, 0.2))),
+		"gpu_h100": _liquid(_gpu("H100", 25000, 70.0, 700.0, Color(1.0, 0.8, 0.1))),
 		"powerstrip": {"label": "Power strip", "price": 25, "power_port": true, "provides": "power", "sockets": 4, "fragile": true,
 			"max_watts": 2000.0,
 			"size": Vector3(0.4, 0.045, 0.07), "mass": 0.6, "parts": [
@@ -158,6 +180,48 @@ static func _build() -> Dictionary:
 				[Vector3(0.04, 1.3, 0.04), Vector3(0, -0.13, 0), Color(0.6, 0.62, 0.66), 0.0],
 				[Vector3(0.36, 0.3, 0.36), Vector3(0, 0.65, 0), Color(1.0, 0.9, 0.7), 2.5, "led"],
 			]},
+		# --- liquid cooling: reservoir -> pump -> manifold -> servers, plus a radiator outdoors ---
+		"pump": {"label": "Coolant pump", "price": 350, "watts": 150.0, "power_port": true, "coolant_port": true,
+			"provides": "coolant", "sockets": 3, "pump": true,
+			"size": Vector3(0.4, 0.35, 0.3), "mass": 9.0, "parts": [
+				[Vector3(0.4, 0.1, 0.3), Vector3(0, -0.125, 0), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(0.22, 0.24, 0.24), Vector3(-0.07, 0.04, 0), Color(0.15, 0.4, 0.85), 0.0],
+				[Vector3(0.14, 0.16, 0.16), Vector3(0.12, 0.0, 0), Color(0.6, 0.62, 0.66), 0.0],
+				[Vector3(0.05, 0.03, 0.02), Vector3(-0.07, 0.1, -0.125), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"reservoir": {"label": "Coolant reservoir", "price": 150, "coolant_port": true, "provides": "coolant",
+			"sockets": 1, "tank": true,
+			"size": Vector3(0.45, 0.7, 0.45), "mass": 6.0, "parts": [
+				[Vector3(0.45, 0.06, 0.45), Vector3(0, -0.32, 0), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(0.4, 0.56, 0.4), Vector3(0, -0.01, 0), Color(0.55, 0.75, 0.95), 0.0],
+				[Vector3(0.45, 0.06, 0.45), Vector3(0, 0.32, 0), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(0.12, 0.05, 0.12), Vector3(0.1, 0.37, 0.1), Color(0.9, 0.2, 0.15), 0.0],
+			]},
+		"radiator": {"label": "Radiator", "price": 500, "coolant_port": true, "radiator": 250.0, "solid": true,
+			"size": Vector3(1.2, 1.0, 0.3), "mass": 30.0, "parts": [
+				[Vector3(1.2, 0.08, 0.3), Vector3(0, -0.46, 0), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(1.1, 0.84, 0.12), Vector3(0, 0.0, 0), Color(0.55, 0.57, 0.6), 0.0],
+				[Vector3(0.4, 0.4, 0.14), Vector3(-0.28, 0.0, 0), Color(0.12, 0.12, 0.14), 0.0],
+				[Vector3(0.4, 0.4, 0.14), Vector3(0.28, 0.0, 0), Color(0.12, 0.12, 0.14), 0.0],
+				[Vector3(1.2, 0.08, 0.3), Vector3(0, 0.46, 0), Color(0.2, 0.2, 0.23), 0.0],
+			]},
+		"manifold": {"label": "Coolant manifold", "price": 120, "coolant_port": true, "provides": "coolant", "sockets": 6,
+			"size": Vector3(0.6, 0.1, 0.12), "mass": 2.0, "parts": [
+				[Vector3(0.6, 0.08, 0.1), Vector3.ZERO, Color(0.75, 0.5, 0.25), 0.0],
+				[Vector3(0.04, 0.05, 0.04), Vector3(-0.22, 0.06, 0), Color(0.2, 0.45, 0.9), 0.0],
+				[Vector3(0.04, 0.05, 0.04), Vector3(-0.11, 0.06, 0), Color(0.2, 0.45, 0.9), 0.0],
+				[Vector3(0.04, 0.05, 0.04), Vector3(0.0, 0.06, 0), Color(0.2, 0.45, 0.9), 0.0],
+				[Vector3(0.04, 0.05, 0.04), Vector3(0.11, 0.06, 0), Color(0.2, 0.45, 0.9), 0.0],
+				[Vector3(0.04, 0.05, 0.04), Vector3(0.22, 0.06, 0), Color(0.2, 0.45, 0.9), 0.0],
+			]},
+		"bucket": {"label": "Bucket", "price": 15, "size": Vector3(0.3, 0.32, 0.3), "mass": 1.0, "parts": [
+			[Vector3(0.3, 0.3, 0.3), Vector3(0, -0.01, 0), Color(0.9, 0.5, 0.1), 0.0],
+			[Vector3(0.24, 0.02, 0.24), Vector3(0, 0.145, 0), Color(0.2, 0.5, 0.95), 0.4, "led"],   # the water
+		]},
+		"suit": {"label": "Heat suit", "price": 400, "wear": true, "size": Vector3(0.5, 0.25, 0.4), "mass": 3.0, "parts": [
+			[Vector3(0.5, 0.2, 0.4), Vector3(0, -0.02, 0), Color(0.8, 0.82, 0.85), 0.0],
+			[Vector3(0.3, 0.06, 0.2), Vector3(0, 0.1, 0), Color(0.95, 0.75, 0.2), 0.0],
+		]},
 		# --- keeping it from burning down ---
 		"fan": {"label": "Box fan", "price": 45, "watts": 30.0, "power_port": true, "fragile": true,
 			"cool": {"vent": 45.0},

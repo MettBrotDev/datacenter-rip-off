@@ -88,6 +88,7 @@ func _ready() -> void:
 	_fixture(-4, "breaker", Vector3(-2.4, 1.45, -D / 2), 0)
 	_fixture(-5, "shop", Vector3(-W / 2 + 0.38, 0.93, -1.0), 90)
 	_fixture(-6, "door", Vector3(2.1, 1.2, D / 2), 180)        # door button, inside
+	_fixture(-9, "tap", Vector3(3.4, 0.7, D / 2 + 1.0), 0)     # garden tap on the front wall, outside
 	_fixture(-7, "door", Vector3(2.1, 1.2, D / 2 + 1.0), 0)    # door button, outside
 
 	_lamp(Vector3(-2.2, H, 0.3), true)
