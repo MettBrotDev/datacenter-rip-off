@@ -29,6 +29,7 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Puddles are flat discs that ignore walls, and nothing mops them up: they dry by themselves.
 - The ops screen text is small from across the garage; it reads well from a few steps away.
 - Flow rate is a fixed 20 l/min per running pump; "back" temperature is shown but does not affect anything.
+- The HUD shows only weather and temperature now; money, tokens and watts are on the ops screen, in the company menu and (balance) in the shop.
 - Without a thermometer the HUD shows "? °C" indoors even while you are overheating; the red screen tint is the only warning.
 - Passing out from heat just moves you to the driveway. Nobody has to rescue you.
 - A server with one liquid-cooled card and one ordinary card is treated as fully liquid-cooled.
@@ -41,6 +42,8 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Fuel no longer competes with income the way it did; generator running costs need another look.
 
 ## Untested
+- The new shop has been looked at but not clicked: category buttons, selecting a part, the quantity
+  buttons and Buy (the purchase itself is tested).
 - The company menu has only been looked at, never clicked: every button, the platform share control,
   Rent / Buy / Write code / Train from the menu itself. The actions behind them are tested.
 - The lower half of the Model Lab tab (training stack, plan, Train) and the restyled shop, haggling

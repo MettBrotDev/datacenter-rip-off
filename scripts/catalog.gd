@@ -42,6 +42,51 @@ const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "gpu_
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
 	"fan", "aircon", "extinguisher", "crate"]
 
+## The parts market's shelves. `color` is a name the shop maps to its palette.
+const CATEGORIES: Array[Dictionary] = [
+	{"key": "compute", "name": "Compute", "icon": "memory", "color": "purple"},
+	{"key": "power", "name": "Power", "icon": "bolt", "color": "amber"},
+	{"key": "cooling", "name": "Cooling", "icon": "water_drop", "color": "cyan"},
+	{"key": "wiring", "name": "Wiring and network", "icon": "cable", "color": "blue"},
+	{"key": "sensors", "name": "Sensors and screens", "icon": "speed", "color": "green"},
+	{"key": "workshop", "name": "Workshop", "icon": "build", "color": "grey"},
+]
+
+## For every part in SHOP: [category key, what the shop says about it].
+const SHOP_INFO: Dictionary = {
+	"server": ["compute", "Second-hand. One tired CPU, two GPU slots and a past nobody talks about."],
+	"gpu_1080": ["compute", "Somebody mined on this for six years. It still works. Usually."],
+	"gpu_4070": ["compute", "New, sensible, boring. Does what it says on the box."],
+	"gpu_4090": ["compute", "Draws 450 W and looks good doing it. The last card that cools itself."],
+	"gpu_a100": ["compute", "A datacenter card. It has no fans: the server it sits on needs a coolant loop."],
+	"gpu_h100": ["compute", "The one everybody is fighting over. Seventy tokens a second, zero fans."],
+	"rack": ["compute", "Holds four servers upright and makes the garage look like you meant it."],
+	"gen_bike": ["power", "An exercise bike with a dynamo. Makes power for as long as a friend keeps pedalling."],
+	"gen_mower": ["power", "A lawnmower engine bolted to an alternator. Loud, thirsty, surprisingly reliable."],
+	"gen_solar": ["power", "Free power from the sky, when the sky feels like it."],
+	"gen_diesel": ["power", "A real generator with four sockets. Weighs as much as a neighbour."],
+	"fuel": ["power", "A full jerry can. Pour it into a generator."],
+	"powerstrip": ["wiring", "Four sockets on a cable. You can plug it into another one. You should not."],
+	"inlet": ["wiring", "Mount it in a building and cable it to a generator: the building's wiring goes live."],
+	"outlet": ["wiring", "Delivers whatever power the building's inlets bring in. Two plugs."],
+	"switch": ["wiring", "Four more network ports. Needs power itself."],
+	"pump": ["cooling", "The heart of a coolant loop. Its own hose goes to a reservoir; everything else plugs into it."],
+	"reservoir": ["cooling", "Holds the water. Fill it by bucket, or hose it to the garden tap and forget about it."],
+	"radiator": ["cooling", "Gets rid of the heat your coolant picked up. Works best outside in the rain."],
+	"manifold": ["cooling", "Six hose sockets, so one pump can serve a whole rack."],
+	"bucket": ["cooling", "For carrying water from the garden tap to a reservoir, three trips at a time."],
+	"fan": ["cooling", "Pushes warm air out of the room a little faster."],
+	"aircon": ["cooling", "Takes 2,500 W of heat out of a room, for 700 W of your precious power."],
+	"thermometer": ["sensors", "Without one you do not know how hot a room is. You will find out anyway."],
+	"sensor_power": ["sensors", "Plug it into a generator or a wall socket and its load shows up on the ops screen."],
+	"sensor_coolant": ["sensors", "Hose it into a loop to see water temperature, flow and reservoir level."],
+	"screen": ["sensors", "Another ops screen for another room. Goes dark without power."],
+	"lamp": ["workshop", "Five watts of cosy light. Goes out in a power cut, which is the funny part."],
+	"extinguisher": ["workshop", "Hold it, look at the fire, click. Buy it before you need it."],
+	"suit": ["workshop", "For working in rooms that would otherwise cook you. Walks like it looks."],
+	"crate": ["workshop", "An empty box. One dollar. Do not ask what it is for."],
+}
+
 ## Weather states. `solar` scales what a solar panel can deliver.
 const WEATHER: Array[Dictionary] = [
 	{"name": "Sunny", "solar": 1.0, "temp": 26.0, "cooling": 0.8, "news": "The sun is out: solar panels at full power"},

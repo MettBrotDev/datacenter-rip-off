@@ -12,6 +12,7 @@ extends Node
 ##   --doa                  host: every used part is dead on arrival
 ##   --demo                 host: give the company a few hours of history (products, a model, users)
 ##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
+##   --shop                 open the parts market
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
@@ -97,6 +98,8 @@ func _handle_args() -> void:
 		world._sim_step(0.0)
 	if args.has("company") and world:
 		world.hud.open_company(args["company"] if args["company"] != "" else "overview")
+	if args.has("shop") and world:
+		world.hud.open_shop()
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("selftest"):

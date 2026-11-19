@@ -70,7 +70,7 @@ func _ready() -> void:
 	bar.alignment = BoxContainer.ALIGNMENT_END
 	bar.add_theme_constant_override("separation", 8)
 	right.add_child(bar)
-	for stat: String in ["WEATHER", "HERE", "COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
+	for stat: String in ["WEATHER", "HERE"]:
 		var tile := UI.hud_panel(10)
 		tile.custom_minimum_size.x = 96 if stat == "HERE" else 150
 		bar.add_child(tile)
@@ -144,16 +144,9 @@ func set_players(players: Dictionary) -> void:
 
 
 ## capacity = watts available right now (grid + running generators); profit is $ per second.
-func set_stats(money: float, tokens: float, watts: float, capacity: float, profit: float, tripped: bool) -> void:
-	profit *= 60.0
-	_values["COMPUTE"].text = "%.0f tok/s" % tokens
-	_values["POWER"].text = "%d / %d W" % [watts, capacity]
-	_values["POWER"].add_theme_color_override("font_color",
-			UI.RED if tripped or watts > capacity else UI.TEXT)
-	_values["NET PROFIT"].text = ("+" if profit >= 0.0 else "-") + UI.money(absf(profit)) + "/min"
-	_values["NET PROFIT"].add_theme_color_override("font_color", UI.GREEN if profit >= 0.0 else UI.RED)
-	_values["BALANCE"].text = UI.money(money)
-	_values["BALANCE"].add_theme_color_override("font_color", UI.GREEN if money >= 0.0 else UI.RED)
+## The HUD deliberately shows no money, tokens or watts: those live on the ops screen, in the
+## company menu and (the balance) in the shop. Walk over and look.
+func set_stats(money: float, _tokens: float, _watts: float, _capacity: float, _profit: float, _tripped: bool) -> void:
 	_shop.set_money(money)
 	_offer.refresh()
 
