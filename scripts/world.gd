@@ -1628,26 +1628,47 @@ func _to_host(method: StringName, args: Array) -> void:
 ## generators, cooling, sensors and tools, furniture. Each group stands on a low display counter
 ## (`raise` scales its height, 0 = on the ground) so a camera can get close.
 func debug_showroom(raise := 1.0) -> void:
-	var fill := {
-		"pc_office": ["cpu_celery", "ram_8", "ram_8", "gpu_1080"],
-		"server": ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070", "gpu_1080"],
-		"server_ws": ["cpu_thread", "ram_32", "ram_32", "gpu_4090", "gpu_4070"],
-		"server_4u": ["cpu_xenon", "cpu_xenon", "ram_64", "ram_64", "ram_64", "gpu_a100", "gpu_a100", "gpu_h100", "gpu_4090"],
-		"server_pod": ["cpu_epycc", "cpu_epycc", "ram_256", "ram_256", "gpu_h100", "gpu_h100", "gpu_h100", "gpu_h100", "gpu_a100", "gpu_a100", "gpu_4090", "gpu_4090"]}
-	var machines: Array = ["pc_office", "server", "server_ws", "server_4u", "server_pod"]
+	var by_price := func(a: String, b: String) -> bool: return Catalog.ITEMS[a]["price"] < Catalog.ITEMS[b]["price"]
+	var kinds_of := func(group: String) -> Array:
+		var out: Array = Catalog.ITEMS.keys().filter(func(k: String) -> bool: return Catalog.ITEMS[k].get("group", "") == group)
+		out.sort_custom(by_price)
+		return out
+	var machines: Array = Catalog.ITEMS.keys().filter(func(k: String) -> bool: return Catalog.ITEMS[k].has("psu"))
+	machines.sort_custom(by_price)
+	var cpus: Array = kinds_of.call("cpu")
+	var rams: Array = kinds_of.call("ram")
+	var gpus: Array = kinds_of.call("gpu")
+	var fill := {}   # machine kind -> the parts to put in it: the best CPU, mid RAM and a different GPU in every slot
+	for m: String in machines:
+		var md: Dictionary = Catalog.ITEMS[m]
+		var tier: int = md["max_tier"]
+		var cpu_ok: Array = cpus.filter(func(k: String) -> bool: return Catalog.ITEMS[k]["tier"] <= tier)
+		var gpu_ok: Array = gpus.filter(func(k: String) -> bool: return Catalog.ITEMS[k]["tier"] <= tier \
+				and (not Catalog.ITEMS[k].get("liquid", false) or md.get("coolant_port", false)))
+		var counts := {}
+		for slot_def: Dictionary in md["slots"]:
+			counts[slot_def["accepts"]] = counts.get(slot_def["accepts"], 0) + 1
+		var picks: Array = []
+		for i in counts.get("cpu", 0):
+			picks.append(cpu_ok[cpu_ok.size() - 1])
+		for i in counts.get("ram", 0):
+			picks.append("ram_16" if tier < 3 else ("ram_64" if tier < 5 else "ram_256"))
+		for i in counts.get("gpu", 0):
+			picks.append(gpu_ok[(gpu_ok.size() - 1 - i) % gpu_ok.size()])
+		fill[m] = picks
 	var groups: Array = [
 		[machines, true, 0.95, 1.0],
 		[machines, false, 0.95, 1.0],
-		[["cpu_celery", "cpu_ryzer", "cpu_thread", "cpu_xenon", "cpu_epycc", "ram_8", "ram_16", "ram_32", "ram_64", "ram_256",
-			"gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100"], false, 1.0, 0.5],
-		[["rack", "rack", "powerstrip", "switch", "inlet", "outlet", "lamp"], false, 0.0],
+		[cpus, false, 1.0, 0.5],
+		[rams, false, 1.0, 0.5],
+		[gpus, false, 1.0, 0.5],
+		[["rack_half", "rack", "rack_tall", "powerstrip", "switch", "inlet", "outlet", "lamp"], false, 0.0],
 		[["gen_bike", "gen_mower", "gen_diesel", "gen_solar"], false, 0.0],
 		[["pump", "reservoir", "radiator", "manifold", "bucket", "fan", "aircon"], false, 0.5],
 		[["thermometer", "sensor_power", "sensor_coolant", "screen", "extinguisher", "fuel", "screwdriver", "suit", "crate", "parcel"], false, 0.9],
 		[["sofa", "tv", "table", "bed", "fridge", "plant"], false, 0.0],
 	]
-	var x := -20.0
-	var first_rack := true
+	var x := -36.0
 	for group: Array in groups:
 		var filled: bool = group[1]
 		var lift: float = (group[2] if group.size() > 2 else 0.0) * raise
@@ -1672,9 +1693,10 @@ func debug_showroom(raise := 1.0) -> void:
 					if slot >= 0:
 						_cast(&"_r_spawn", [_next_id, part, xf, [0, id, slot, 0, 0, false, "", 0, 0, false]])
 						_next_id += 1
-			if kind == "rack" and first_rack:   # the first rack carries four servers
-				first_rack = false
-				for server: String in ["server_4u", "server_ws", "server", "pc_office"]:
+			if kind.begins_with("rack"):   # racks carry servers in every slot
+				var served := ["server_4u", "server_2u", "server_ws", "server_wslc", "server", "server_frame"]
+				for i in (Catalog.ITEMS[kind]["slots"] as Array).size():
+					var server: String = served[i % served.size()] if kind != "rack_half" else ["server_2u", "server_4u"][i]
 					var slot := free_slot(items[id], "server")
 					_cast(&"_r_spawn", [_next_id, server, xf, [0, id, slot, 0, 0, false, "", 0, 0, false]])
 					_next_id += 1
