@@ -49,10 +49,18 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - People: above 50 C (deliberately generous) the local player's `exposure` builds up; at 100% they pass out and wake on the
   driveway. A worn heat suit (`Item.worn`) prevents it and slows walking.
 - Money: servers only make TOKENS. `company.gd` (host only, rules) and `company_data.gd` (all content
-  and numbers) turn them into money: selling raw on a swinging spot market (worst deal), slop (cheap,
-  short-lived income), products (size and launch-style choices, updatable, can be rushed or cancelled),
-  training your own model generations (multiplies everything, can fail), and an API platform with
-  marketing campaigns. Lifetime earnings set the funding stage, which unlocks content, slots and storage.
+  and numbers) turn them into money. Design intent from the owner: money is ALWAYS TIGHT, and there is
+  a steep ladder where every step needs far more tokens and pays more per token.
+  - Raw tokens sell on a swinging spot market (worst deal). Slop: cheap, short-lived. Products: need a
+    smart model and hundreds of thousands to millions of tokens, i.e. real infrastructure.
+  - Models have four stats: `smart` 1-5 (what it can make, how good its code is), `productivity`
+    (income per token), `reliability` (not hallucinating), `speed`. Licensed models (parody names) are
+    rented per minute or bought; some are slop-only.
+  - Own models: the model in use writes a five-part training stack (`COMPONENTS`, levels 0-5, capped by
+    its smartness); a stack at level N trains a model of smartness N + 1. No licence fees afterwards.
+  - Running costs never stop: garage rent (until the landlady's house is ours), property tax per
+    house, model licence, 12% taxes. Below zero the landlady cuts the garage's internet.
+  - Lifetime earnings set the funding stage: unlocks content, +1 slot, token storage x6.
   Every peer sees `world.co` (= `Company.state()`); actions go through `world.request_company()`.
 - Ops screen: `ops_board.gd` is one SubViewport dashboard shown by every `ops_screen.gd` (a fixed one on
   the garage's back wall, plus the buyable `screen` item). Headline numbers are always on it; details
