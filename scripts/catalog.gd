@@ -46,6 +46,12 @@ const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its
 const MAX_CABLE := 7.0           # metres a loose stretch of cable reaches before it gets yanked out
 const MAX_ROUTED := 40.0         # metres of cable in total when it is pinned along the way
 const MAX_PINS := 24
+# Loose CPUs, RAM sticks and GPUs are delicate. A hit takes speed off them: below HIT_SAFE m/s nothing happens
+# (letting go at chest height is about 5), from HIT_SURE up it is certain (a throw lands at 8 to 10).
+const HIT_SAFE := 6.5
+const HIT_SURE := 10.0
+const HIT_INSIDE := 0.25         # chance for each part inside a machine that takes such a hit
+const STEP_WALK := 0.15          # chance that walking over a part on the floor breaks it; sprinting always does
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
 const SHOP: Array[String] = ["server_ws", "server_4u", "server_pod",
 	"cpu_celery", "cpu_ryzer", "cpu_thread", "cpu_xenon", "cpu_epycc",

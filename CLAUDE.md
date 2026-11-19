@@ -97,6 +97,9 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Fire comes from causes that make sense: power strips over 2000 W, and used servers whose thermal
   protection is broken (`Item.sketchy`). It ruins items after 6 s, spreads to flammable neighbours,
   and is put out with an extinguisher or by rain.
+- Loose CPUs, RAM and GPUs are delicate (`world._feel_impact`, `_underfoot`, constants in the catalog): a hard
+  landing (a throw; letting go at chest height is safe) or being stepped on (sprinting always, walking 15%)
+  kills them. A thrown machine can lose parts inside. Parts in parcels, in hands and in slots are safe.
 - Sprinting across a cable or hose pulls it out. Used parts may be dead on arrival.
 - Second-hand market (`used_market.gd`, host rules; `world.used` for clients; a tab of the parts market): about nine
   random, time-limited offers at 30-70% of the new price, each with a hidden condition applied on unpacking

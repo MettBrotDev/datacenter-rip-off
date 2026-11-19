@@ -32,6 +32,8 @@ var burning := false    # host only: on fire; reaches other peers as status bit 
 var burn := 0.0         # host only: seconds it has been burning
 var cooked := false     # host only: server in thermal shutdown
 var sketchy := false    # host only: second-hand server whose thermal protection is broken
+var last_vel := Vector3.ZERO   # host only: velocity one physics tick ago, to notice hard landings
+var thrown_by := ""     # host only: who let go of it last
 var draining := false   # host only: pump is sucking its hoses empty
 # generators only (the host simulates these and replicates them twice a second)
 var running := false    # fuel generators and pumps: switched on

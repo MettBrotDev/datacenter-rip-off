@@ -26,6 +26,7 @@ const Company = preload("res://scripts/company.gd")
 const OpsScreen = preload("res://scripts/ops_screen.gd")
 const Town = preload("res://scripts/town.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
+const DELICATE := ["cpu", "ram", "gpu"]   # item groups that break when thrown or stepped on
 const LINKS := {"power": "power cable", "net": "network cable", "coolant": "coolant hose"}   # link type -> its name
 const GARAGE_CIRCUIT := 1000                  # houses use their own id as circuit id
 # What a neighbour says to an offer, by how close it was to the price they have in mind.
@@ -79,6 +80,7 @@ var _items: Node3D
 var _sim: Sim                   # host only
 var _company: Company           # host only
 var _at_console: Dictionary = {}   # host only: peers who have the company console open
+var _stepped: Dictionary = {}      # host only: "peer:item" pairs where that player stands on that part right now
 var _haggle: Dictionary = {}    # host only: house id -> {"reserve", "mood", "until"}
 var _demolish_asked: Dictionary = {}   # host only: house id -> time of the first press
 var _next_id := 1
@@ -189,6 +191,55 @@ func debug_cables() -> void:
 	_spawn("server", Transform3D(Basis(), Vector3(2.3, 0.3, 1.6)))
 	request_link(neat, "net", -3, [Vector3(2.3, 0.02, 1.0), Vector3(3.35, 0.02, 1.0), Vector3(3.35, 0.02, -3.3),
 		Vector3(1.7, 0.02, -3.44), Vector3(1.7, 1.3, -3.47)])
+
+
+## Host, every physics tick: a delicate part that lands hard breaks; a machine that does may lose parts inside.
+func _feel_impact(it: Item) -> void:
+	var before := it.last_vel
+	var now := it.linear_velocity if it.is_loose() and not it.pinned else Vector3.ZERO
+	it.last_vel = now
+	if before.length() < Catalog.HIT_SAFE or not it.is_loose():
+		return
+	var hit := (before - now).length()
+	if hit < Catalog.HIT_SAFE or randf() > inverse_lerp(Catalog.HIT_SAFE, Catalog.HIT_SURE, hit):
+		return
+	var who: String = it.thrown_by if it.thrown_by != "" else "Somebody"
+	if it.def.get("group", "") in DELICATE and not it.dead and not it.broken:
+		it.dead = true
+		_cast(&"_r_toast", ["%s threw a %s. It did not survive the landing." % [who, it.label.to_lower()]])
+	elif it.def.has("psu"):
+		var lost: Array[String] = []
+		for part: Item in items.values():
+			if part.parent == it.id and not part.dead and not part.broken and randf() < Catalog.HIT_INSIDE:
+				part.dead = true
+				lost.append(part.label.to_lower())
+		if not lost.is_empty():
+			_cast(&"_r_toast", ["%s threw a %s. Something rattles inside now: %s." % [who, it.label.to_lower(), ", ".join(lost)]])
+
+
+## Host: loose parts lying where somebody walks get stepped on. Once per step onto them.
+func _underfoot() -> void:
+	if _tick % 6 != 0:
+		return
+	var still := {}
+	for p: Node3D in _players.get_children():
+		var pace := Vector2(p.velocity_estimate.x, p.velocity_estimate.z).length()
+		if pace < 1.0 or pace > 12.0:   # standing still, or teleported
+			continue
+		for it: Item in items.values():
+			if not it.def.get("group", "") in DELICATE or not it.is_loose() or it.dead or it.broken:
+				continue
+			var d: Vector3 = it.global_position - p.global_position
+			if absf(d.y) > 0.25 or Vector2(d.x, d.z).length() > 0.2 + maxf(it.def["size"].x, it.def["size"].z) * 0.35:
+				continue
+			var key := "%d:%d" % [p.peer_id, it.id]
+			still[key] = true
+			if _stepped.has(key):
+				continue
+			if pace > 5.0 or randf() < Catalog.STEP_WALK:
+				it.dead = true
+				_cast(&"_r_toast", ["%s stepped on a %s. Crunch." % [name_of(p.peer_id), it.label.to_lower()]])
+	_stepped = still
 
 
 ## Whatever a cable can be plugged into: an item (id > 0) or a fixture (id < 0).
@@ -655,7 +706,7 @@ func _h_release(throw: bool) -> void:
 	var xf := it.global_transform
 	var p := player(peer)
 	if p:
-		vel = p.velocity_estimate * 0.6
+		vel = (p.velocity_estimate * 0.6).limit_length(5.0)   # what you carry moves with you, within reason
 		if throw:
 			vel += p.aim_dir() * 7.0 + Vector3.UP * 1.5
 		# never let go of something inside or behind a wall
@@ -664,6 +715,7 @@ func _h_release(throw: bool) -> void:
 		var hit := get_world_3d().direct_space_state.intersect_ray(query)
 		if hit:
 			xf.origin = from.lerp(hit["position"], 0.6)
+	it.thrown_by = name_of(peer)
 	_cast(&"_r_release", [it.id, xf, vel])
 
 
@@ -1238,6 +1290,8 @@ func _physics_process(dt: float) -> void:
 	for it: Item in items.values():   # safety net: anything that escapes the level comes back
 		if it.is_loose() and it.position.y < -5.0:
 			_cast(&"_r_release", [it.id, Transform3D(Basis(), Vector3(0, 1.5, 0)), Vector3.ZERO])
+		_feel_impact(it)
+	_underfoot()
 	_sim_t += dt
 	if _sim_t >= SIM_STEP:
 		_sim_t -= SIM_STEP

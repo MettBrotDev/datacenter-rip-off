@@ -651,6 +651,24 @@ func _selftest() -> void:
 	me.rotation.y = 0.15
 	me.head.rotation.x = 0.12
 
+	# 17. delicate parts: a gentle drop is fine, a throw is not, and neither is sprinting over one
+	var sticks: Array = []
+	for i in 3:
+		world._spawn("ram_16", Transform3D(Basis(), Vector3(-2.0 + i, 1.2, 14.0)))
+		sticks.append(world.items[world._next_id - 1])
+		world._cast(&"_r_release", [sticks[i].id, Transform3D(Basis(), Vector3(-2.0 + i, 1.2, 14.0)),
+			Vector3(0, -11.0 if i == 1 else 0.0, 0)])
+	me.position = Vector3(5, 0, 14)
+	await _wait(1.5)
+	var after_fall: Array = sticks.map(func(it: Node3D) -> bool: return it.dead)
+	me.position = sticks[2].global_position - Vector3(0, 0.02, 0)
+	me.velocity_estimate = Vector3(6.5, 0, 0)
+	world._tick = 6
+	world._physics_process(0.0)
+	print("CHECK RAM dropped from 1.2 m: broken=%s; slammed down at 11 m/s: broken=%s; sprinted over: broken=%s" % [
+		after_fall[0], after_fall[1], sticks[2].dead])
+	me.position = Vector3(0.6, 0, 1.2)
+
 
 ## Lets simulated time pass quickly: `seconds` of game time in half-second steps.
 ## Run the company alone (no power, no heat, no running costs: only what the compute earns) for `seconds`
