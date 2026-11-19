@@ -62,7 +62,7 @@ const SHOP: Array[String] = ["mini_pc", "server_frame", "server_ws", "server_2u"
 	"powerstrip", "switch", "rack_half", "rack", "rack_tall", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
 	"thermometer", "sensor_power", "sensor_coolant", "screen",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
-	"fan", "aircon", "extinguisher", "crate"]
+	"fan", "aircon", "purifier", "duster", "extinguisher", "crate"]
 
 ## The parts market's shelves. `color` is a name the shop maps to its palette.
 ## A category with more than a handful of parts lists its `subs` ([{key, name}]); every SHOP_INFO entry of such a
@@ -130,6 +130,8 @@ const SHOP_INFO: Dictionary = {
 	"screen": ["sensors", "Another ops screen for another room. Goes dark without power."],
 	"lamp": ["workshop", "Five watts of cosy light. Goes out in a power cut, which is the funny part."],
 	"extinguisher": ["workshop", "Hold it, look at the fire, click. Buy it before you need it."],
+	"duster": ["workshop", "A can of compressed air. Open machines fill up with dust; this blows it back into the room."],
+	"purifier": ["cooling", "Filters the air of a whole building. While it has power, nothing in there gathers dust.", "air"],
 	"suit": ["workshop", "For working in rooms that would otherwise cook you. Walks like it looks."],
 	"crate": ["workshop", "An empty box. One dollar. Do not ask what it is for."],
 	"mini_pc": ["compute", "A lunchbox with one GPU slot and a power supply for a laptop. Does not fit a 4070, nor any dreams.", "rigs"],
@@ -945,6 +947,25 @@ static func _build() -> Dictionary:
 		"gpu_b200": _liquid(_gpu("B200", 48000, 5, 130.0, 1100.0, 192, Color(0.4, 1.0, 0.3),
 			{"plates": 2, "plate": Color(0.9, 0.62, 0.3), "trim": Color(0.35, 0.9, 0.4), "body": Color(0.05, 0.07, 0.05), "thick": 0.045}),
 			{"plates": 2, "plate": Color(0.9, 0.62, 0.3), "trim": Color(0.35, 0.9, 0.4), "body": Color(0.05, 0.07, 0.05), "thick": 0.045}),
+		# A machine's lid once it has been unscrewed. `contains` says which machine it is from: see lid().
+		"lid": {"label": "Machine lid", "price": 20, "size": Vector3(0.45, 0.03, 0.5), "mass": 1.2, "parts": []},
+		"duster": {"label": "Air duster", "price": 12, "tool": "duster", "size": Vector3(0.07, 0.22, 0.07), "mass": 0.3, "parts": [
+			_cyl(0.066, 0.17, Vector3(0, -0.02, 0), Color(0.2, 0.55, 0.9), "y", "metal", 0.01),
+			_cyl(0.05, 0.02, Vector3(0, 0.075, 0), Color(0.9, 0.9, 0.92), "y", "plastic", 0.005),
+			_cyl(0.03, 0.03, Vector3(0, 0.095, 0), Color(0.9, 0.2, 0.15), "y", "plastic", 0.005),
+			_cyl(0.006, 0.09, Vector3(0, 0.1, 0.045), Color(0.9, 0.2, 0.15), "z", "plastic", 0.0),
+			_p(Vector3(0.068, 0.05, 0.068), Vector3(0, -0.03, 0), Color(0.95, 0.95, 0.9), "plastic", 0.03),
+		]},
+		"purifier": {"label": "Air purifier", "price": 600, "watts": 60.0, "power_port": true, "fragile": true, "solid": true,
+			"purifier": true, "size": Vector3(0.36, 0.7, 0.3), "mass": 9.0, "parts": [
+			_p(Vector3(0.36, 0.7, 0.3), Vector3.ZERO, Color(0.93, 0.94, 0.95), "plastic", 0.04),
+			_p(Vector3(0.3, 0.42, 0.01), Vector3(0, -0.08, -0.151), Color(0.2, 0.22, 0.26), "matte", 0.01),
+			_p(Vector3(0.3, 0.012, 0.012), Vector3(0, 0.0, -0.158), Color(0.75, 0.77, 0.8), "plastic", 0.0),
+			_p(Vector3(0.3, 0.012, 0.012), Vector3(0, -0.1, -0.158), Color(0.75, 0.77, 0.8), "plastic", 0.0),
+			_p(Vector3(0.3, 0.012, 0.012), Vector3(0, -0.2, -0.158), Color(0.75, 0.77, 0.8), "plastic", 0.0),
+			_p(Vector3(0.26, 0.01, 0.2), Vector3(0, 0.351, 0), Color(0.2, 0.22, 0.26), "matte", 0.0),
+			_led(Vector3(0.1, 0.012, 0.006), Vector3(0, 0.24, -0.152), Color(0.3, 0.9, 1.0), 2.5),
+		]},
 		"screwdriver": {"label": "Screwdriver", "price": 10, "tool": "screwdriver", "size": Vector3(0.04, 0.04, 0.24), "mass": 0.2, "parts": [
 			_cyl(0.038, 0.1, Vector3(0, 0, 0.07), Color(0.9, 0.2, 0.15), "z", "plastic", 0.01),
 			_cyl(0.04, 0.012, Vector3(0, 0, 0.035), Color(0.1, 0.1, 0.12), "z", "rubber", 0.003),
@@ -1525,6 +1546,19 @@ static func _aircon_parts() -> Array:
 
 
 ## The cardboard box a purchase arrives in: sized to fit, labelled, and rainproof.
+## The definition of the lid of machine `kind`, as an item of its own.
+static func lid(kind: String) -> Dictionary:
+	var machine: Dictionary = ITEMS[kind]
+	var box: Array = machine["lid_box"]
+	var size: Vector3 = box[0]
+	return {"label": "Lid of the %s" % str(machine["label"]).replace(" (used)", "").to_lower(), "price": lid_price(kind),
+		"size": Vector3(size.x, maxf(size.y, 0.02), size.z), "mass": 1.2, "parts": lid_parts(machine)}
+
+
+static func lid_price(kind: String) -> int:
+	return maxi(15, int(ITEMS[kind]["price"] * 0.08))
+
+
 static func parcel(kind: String) -> Dictionary:
 	var inside: Dictionary = ITEMS[kind]
 	var fit: Vector3 = inside["size"]

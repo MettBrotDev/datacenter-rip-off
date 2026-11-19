@@ -56,6 +56,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Memory has generations (`Catalog.RAM_TYPE`: ddr3, ddr4, ddr5, rdimm = server grade). Every machine takes exactly
   one and a stick of another does not fit (`world.attach_problem`); `RAM_SPEED` scales what the GPUs make
   (DDR3 -10%, DDR4 0, DDR5 +6%, RDIMM +12%). The used starter machines are DDR3.
+- Lids are items: the screwdriver unscrews a lid, which then lies next to the machine as a `lid` item
+  (`Item.contains` = the machine kind it fits, definition from `Catalog.lid()`); carried to its machine it goes
+  back on with a left click. A lost lid can be re-ordered at the machine with the screwdriver (Q).
+- Dust (`Item.dust` 0..1, `sim._chip_step`): a running machine gathers it, fast with the lid off or with no lid
+  at all (full in 12 min), slowly when closed (2 h); it adds up to `DUST_RISE` 30 C to the chips. The air duster
+  tool blows it out (lid must be off); a powered air purifier (`purifier` in the catalog) stops dust in its building.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
 - Heat uses believable numbers. Rooms: every watt used in a building warms its air (`sim._room_step`);
   doors, fans, air conditioners cool it. Chips (`Item.heat` on servers): about 48 C above the room when

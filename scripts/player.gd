@@ -340,11 +340,23 @@ func _update_actions() -> void:
 		elif held.kind == "bucket" and held.fuel > 0.0 and t is RigidBody3D and t.def.has("tank"):
 			acts.append(["interact", "[E] Pour into the reservoir (%d%% full)" % (t.fuel * 100.0), _world.request_bucket.bind(t.id)])
 		elif held.def.get("tool", "") == "screwdriver" and t is RigidBody3D and t.def.get("lid", false):
-			if t.is_loose():
-				acts.append(["interact", "[E] %s" % ("Screw the lid back on" if t.opened else "Unscrew the lid"),
-						_world.request_lid.bind(t.id)])
+			if t.opened:
+				acts.append(["", "Its lid is off. The lid goes back on by hand: pick it up and bring it here.", Callable()])
+				acts.append(["use", "[Q] Lost it? Order a spare lid (%s)" % UI.money(Catalog.lid_price(t.kind)), _world.request_spare_lid.bind(t.id)])
+			elif t.is_loose():
+				acts.append(["interact", "[E] Unscrew the lid", _world.request_lid.bind(t.id)])
 			else:
 				acts.append(["", "Take it out of the rack before opening it", Callable()])
+		elif held.kind == "lid" and t is RigidBody3D and t.def.get("lid", false) and t.opened:
+			if held.contains == t.kind:
+				acts.append(["primary", "[LMB] Put the lid on", _world.request_lid_on.bind(t.id)])
+			else:
+				acts.append(["", "This is the %s. It does not fit here." % held.label.to_lower(), Callable()])
+		elif held.def.get("tool", "") == "duster" and t is RigidBody3D and t.def.has("psu"):
+			if t.def.get("lid", false) and not t.opened:
+				acts.append(["", "Dust %d%%. Take the lid off to blow it out." % (t.dust * 100.0), Callable()])
+			else:
+				acts.append(["interact", "[E] Blow the dust out (%d%%)" % (t.dust * 100.0), _world.request_dust.bind(t.id)])
 		else:
 			# Parts snap into a free slot of the machine (or rack) you are looking into.
 			var mount := _mount_spot(held, t)
@@ -541,7 +553,10 @@ func _machine_lines(t: Node3D, acts: Array) -> void:
 		acts.append(["", "Will not boot: %s" % report["why"], Callable()])
 	for note: String in report["notes"]:
 		acts.append(["", note, Callable()])
-	acts.append(["", "The lid is off: parts go in and out" if t.opened else "Lid screwed on: a screwdriver opens it", Callable()])
+	if t.def.get("lid", false):
+		acts.append(["", "The lid is off: parts go in and out, and so does dust" if t.opened else "Lid screwed on: a screwdriver opens it", Callable()])
+	if t.dust >= 0.05:
+		acts.append(["", "Dust %d%%%s" % [t.dust * 100.0, ": chips run up to %d °C hotter. An air duster fixes that." % (t.dust * Sim.DUST_RISE) if t.dust >= 0.25 else ""], Callable()])
 
 
 func _place() -> void:

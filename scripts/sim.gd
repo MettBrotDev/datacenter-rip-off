@@ -35,6 +35,9 @@ const CHIP_RISE_DRY := 110.0   # a fanless card with no coolant moving: far too 
 const CHIP_THROTTLE := 85.0    # half speed
 const CHIP_SHUTDOWN := 100.0   # switches itself off...
 const CHIP_RESUME := 80.0      # ...until it is this cool again
+const DUST_RISE := 30.0        # degrees hotter a machine choked with dust runs
+const DUST_OPEN := 1.0 / 720.0     # dust per second in a running machine with no lid on: full in 12 minutes
+const DUST_CLOSED := 1.0 / 7200.0  # ...with its lid on: full in two hours
 const CHIP_IGNITE := 110.0     # hardware whose protection is broken keeps going, then burns
 const EVAPORATION := 0.0011    # share of a reservoir lost per second while its loop runs
 const BURN_RUINS := 6.0        # seconds on fire before an item is ruined
@@ -413,6 +416,10 @@ func _room_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: 
 func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of: Dictionary,
 		flowing: Dictionary, reports: Dictionary, dt: float, events: Array) -> void:
 	var outside := outside_temp()
+	var filtered := {}   # circuit id -> true where a running air purifier keeps the dust out of the air
+	for it: Node3D in world.items.values():
+		if it.def.get("purifier", false) and powered.get(it.id, false) and not ruined.has(it.id) and not world.is_outdoors(it.global_position):
+			filtered[world.circuit_at(it.global_position)] = true
 	for it: Node3D in world.items.values():
 		if not reports.has(it.id):
 			continue
@@ -435,6 +442,11 @@ func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of:
 					target = room + CHIP_RISE_DRY
 				else:
 					target = room + (CHIP_RISE_CPU if cards.is_empty() else CHIP_RISE_AIR)
+				# Fans pull dust in, much faster with the lid off; a purifier in the building stops it.
+				if not (filtered.has(c) and not world.is_outdoors(it.global_position)):
+					var lidless: bool = it.opened or not it.def.get("lid", false)
+					it.dust = minf(1.0, it.dust + (DUST_OPEN if lidless else DUST_CLOSED) * dt)
+				target += it.dust * DUST_RISE
 		it.heat += (target - it.heat) * (1.0 - exp(-dt / CHIP_TIME))
 		if it.heat >= CHIP_IGNITE and it.sketchy and not it.burning and not ruined.has(it.id):
 			ignite(it)

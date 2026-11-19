@@ -915,17 +915,17 @@ func foot(blob: Node3D, phase: float, speed: float, in_air: bool, suit: float, l
 		return
 	var pos := blob.global_position
 	var own: bool = blob.get_parent().peer_id == multiplayer.get_unique_id()
-	var vol := -3.0 + clampf((speed - 3.0) * 1.2, -4.0, 4.0) + load_heavy * 2.0 - (4.0 if own else 0.0)
+	var vol := -17.0 + clampf((speed - 3.0) * 0.8, -3.0, 3.0) + load_heavy * 2.0 - (5.0 if own else 0.0)   # feet are background
 	var pitch := 1.0 + clampf((speed - 4.0) * 0.03, -0.1, 0.1) - load_heavy * 0.12
 	at("step_%s_%d" % [surface_at(pos), randi() % 3], pos, vol, pitch)
 	if suit > 0.5:
-		at("rust_%d" % (randi() % 3), pos + Vector3(0, 0.8, 0), 3.0 - (4.0 if own else 0.0))
+		at("rust_%d" % (randi() % 3), pos + Vector3(0, 0.8, 0), -8.0 - (4.0 if own else 0.0))
 
 
 ## blob.animate: left the ground.
 func jump(blob: Node3D, vy: float) -> void:
 	if enabled and _world and vy > 1.0 and _is_player_blob(blob):
-		at("jump", blob.global_position + Vector3(0, 0.6, 0), -2.0)
+		at("jump", blob.global_position + Vector3(0, 0.6, 0), -12.0)
 
 
 ## blob.animate: back on the ground after a fall of strength `hit` (about 1.5 .. 7).
@@ -933,7 +933,7 @@ func land(blob: Node3D, hit: float) -> void:
 	if not enabled or _world == null or not _is_player_blob(blob):
 		return
 	var pos := blob.global_position
-	var vol := -8.0 + clampf(hit, 1.5, 7.0) * 1.4
+	var vol := -18.0 + clampf(hit, 1.5, 7.0) * 1.4
 	at("step_%s_%d" % [surface_at(pos), randi() % 3], pos, vol, 0.8)
 	if hit > 3.5:
 		at("rust_%d" % (randi() % 3), pos + Vector3(0, 0.8, 0), 0.0)

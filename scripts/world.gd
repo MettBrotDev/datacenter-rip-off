@@ -169,6 +169,10 @@ func debug_bench() -> void:
 			var slot := free_slot(items[machine_id], Catalog.ITEMS[kind]["group"])
 			_cast(&"_r_spawn", [_next_id, kind, Transform3D(Basis(), build[1]), [0, machine_id, slot, 0, 0, false, "", 0, 0, false]])
 			_next_id += 1
+	for kind: String in ["server", "server_4u"]:   # their lids, lying where somebody left them
+		_spawn("lid", Transform3D(Basis(Vector3.UP, 0.3), Vector3(-1.3 if kind == "server" else 1.3, 0.2, 6.2)), kind)
+	for kind: String in ["duster", "purifier"]:
+		_spawn(kind, Transform3D(Basis(), Vector3(-1.9 if kind == "duster" else 2.1, 0.5, 5.4)))
 	for kind: String in ["cpu_celery", "ram_8", "gpu_h100", "screwdriver"]:   # loose parts beside them
 		_spawn(kind, Transform3D(Basis(), Vector3(-0.3 + _next_id % 4 * 0.2, 0.3, 6.7)))
 
@@ -451,9 +455,21 @@ func request_attach(parent_id: int, slot := -1) -> void:
 	_to_host(&"_h_attach", [parent_id, slot])
 
 
-## With a screwdriver in hand: open or close a machine's lid.
+## With a screwdriver in hand: unscrew a machine's lid. The lid becomes an item lying next to it.
 func request_lid(id: int) -> void:
 	_to_host(&"_h_lid", [id])
+
+
+func request_lid_on(id: int) -> void:
+	_to_host(&"_h_lid_on", [id])
+
+
+func request_spare_lid(id: int) -> void:
+	_to_host(&"_h_spare_lid", [id])
+
+
+func request_dust(id: int) -> void:
+	_to_host(&"_h_dust", [id])
 
 
 ## provider_id 0 = unplug.
@@ -800,7 +816,59 @@ func _h_lid(id: int) -> void:
 		return
 	if not machine.def.get("lid", false) or not machine.is_loose():
 		return
-	_cast(&"_r_lid", [id, not machine.opened])
+	if machine.opened:   # a screwdriver only takes lids off; the lid goes back on by hand
+		return
+	_cast(&"_r_lid", [id, true])
+	# The lid is a thing of its own from here on. It can be put down anywhere, and lost.
+	var side: Vector3 = machine.global_transform.basis.x.normalized() * (machine.def["size"].x * 0.5 + 0.3)
+	_spawn("lid", Transform3D(machine.global_transform.basis.orthonormalized(), machine.global_position + side + Vector3(0, 0.1, 0)), machine.kind)
+
+
+## Holding its lid: put it back on an open machine.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_lid_on(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var lid := held_by(Net.sender())
+	var machine: Item = items.get(id)
+	if lid == null or lid.kind != "lid" or machine == null or not machine.opened or lid.contains != machine.kind:
+		return
+	_cast(&"_r_despawn", [lid.id])
+	_cast(&"_r_lid", [id, false])
+
+
+## With a screwdriver in hand: order a new lid for an open machine. It arrives on the driveway, unboxed.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_spare_lid(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var machine: Item = items.get(id)
+	if machine == null or not machine.def.get("lid", false):
+		return
+	var cost := Catalog.lid_price(machine.kind)
+	if _sim.money < cost:
+		_notice_to(Net.sender(), "A spare lid costs %s. You do not have that." % UI.money(cost))
+		return
+	_sim.money -= cost
+	var slot := _deliveries % 15
+	_deliveries += 1
+	_spawn("lid", Transform3D(Basis(), Vector3(-2.0 + (slot % 5) * 1.0, 0.2, 7.0 + (slot / 5) * 1.2)), machine.kind)
+	_cast(&"_r_toast", ["%s lost a lid and ordered a new one (-%s). It is on the driveway." % [name_of(Net.sender()), UI.money(cost)]])
+
+
+## With an air duster in hand: blow the dust out of a machine whose lid is off.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_dust(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var tool := held_by(Net.sender())
+	var machine: Item = items.get(id)
+	if tool == null or tool.def.get("tool", "") != "duster" or machine == null or not machine.def.has("psu"):
+		return
+	if machine.def.get("lid", false) and not machine.opened:
+		return
+	machine.dust = 0.0
+	_sim_step(0.0)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -1446,7 +1514,7 @@ func _sim_step(dt: float) -> void:
 	for it: Item in items.values():
 		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \
 				or it.def.has("psu") or it.coolant_to != 0 or it.hose > 0.0:
-			gens[it.id] = [it.running, it.fuel, it.rider, it.load, it.hose, it.heat]
+			gens[it.id] = [it.running, it.fuel, it.rider, it.load, it.hose, it.heat, it.dust]
 	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather,
 		_sim.temps, _sim.outside_temp(), _sim.wiring], status, gens])
 
@@ -1652,6 +1720,7 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 			it.load = gens[id][3]
 			it.hose = gens[id][4]
 			it.heat = gens[id][5]
+			it.dust = gens[id][6]
 			if it.kind == "bucket":
 				it.set_status(3 if it.fuel > 0.0 else 0)   # its "light" is the water in it
 	for f: Node3D in fixtures.values():

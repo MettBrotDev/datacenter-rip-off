@@ -25,6 +25,7 @@ var loose_end: Dictionary = {}   # link type -> Vector3: that cable is not plugg
 var cable_m: Dictionary = {}   # link type -> metres of that cable already paid for
 var worn := 0           # heat suit: peer id wearing it
 var opened := false     # machines: the lid is off, parts can go in and out
+var dust := 0.0         # machines: 0 clean .. 1 choked; the host simulates it, every peer sees it
 var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation
 var contains := ""      # parcels: the item kind inside
 var broken := false     # ruined by rain; set through status bit 2 so every peer shows it
@@ -65,7 +66,7 @@ func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 	id = p_id
 	kind = p_kind
 	contains = p_contains
-	def = Catalog.parcel(contains) if kind == "parcel" else Catalog.ITEMS[kind]
+	def = Catalog.parcel(contains) if kind == "parcel" else (Catalog.lid(contains) if kind == "lid" else Catalog.ITEMS[kind])
 	label = def["label"]
 	provides = def.get("provides", "")
 	sockets = def.get("sockets", 0)

@@ -183,9 +183,8 @@ func _selftest() -> void:
 	world.request_grab(card.id)
 	world.request_attach(server.id, world.free_slot(server, "gpu"))
 	print("CHECK lid off=%s, GPU sits in slot %d of the server" % [server.opened, card.slot])
-	world.request_grab(kit["screwdriver"].id)
-	world.request_lid(server.id)
-	world.request_release(false)
+	_put_lid(server)
+	print("CHECK lid back on by hand: opened=%s, lids lying about=%d" % [server.opened, _count("lid")])
 	world.request_link(strip.id, "power", bike.id)
 	world.request_link(server.id, "power", strip.id)
 	world.request_link(server.id, "net", -3)
@@ -380,9 +379,7 @@ func _selftest() -> void:
 		world.request_grab(kit[kind].id)
 		me.position = Vector3(2.6, 0, 1.6)
 		world.request_attach(big.id)
-	world.request_grab(driver.id)
-	world.request_lid(big.id)
-	world.request_release(false)
+	_put_lid(big)
 	world.request_link(big.id, "power", strip.id)
 	world.request_link(big.id, "net", -3)
 	await _run(40.0)
@@ -672,6 +669,18 @@ func _selftest() -> void:
 		sticks.append(world.items[world._next_id - 1])
 		world._cast(&"_r_release", [sticks[i].id, Transform3D(Basis(), Vector3(-2.0 + i, 1.2, 14.0)),
 			Vector3(0, -11.0 if i == 1 else 0.0, 0)])
+	#     dust: an open frame fills up, an air duster empties it
+	world._spawn("server_frame", Transform3D(Basis(), Vector3(3, 0.3, 14)))
+	var frame: Node3D = world.items[world._next_id - 1]
+	world._spawn("duster", Transform3D(Basis(), Vector3(3, 0.3, 15)))
+	var can: Node3D = world.items[world._next_id - 1]
+	frame.dust = 0.6
+	me.position = Vector3(3, 0, 15.8)
+	world.request_grab(can.id)
+	world.request_dust(frame.id)
+	world.request_release(false)
+	print("CHECK dust: starter server after the whole test %d%%, frame 60%% -> %d%% after the air duster" % [
+		world.items[1].dust * 100.0 if world.items.has(1) else -1, frame.dust * 100.0])
 	var towers: Array = world.items.values().filter(func(it: Node3D) -> bool: return it.kind == "server")
 	if not towers.is_empty():
 		print("CHECK DDR4 stick into the old DDR3 tower: %s" % world.attach_problem(sticks[0], towers[0]))
@@ -698,6 +707,16 @@ func _co_run(seconds: float, tps: float) -> void:
 		world._sim.money += company.tick(1.0, 0.0, world._sim.money, 0, false, events)
 		world._announce(events)
 	world.co = company.state()
+
+
+## Picks up the lid that came off `machine` and puts it back on.
+func _put_lid(machine: Node3D) -> void:
+	for it: Node3D in world.items.values():
+		if it.kind == "lid" and it.contains == machine.kind and it.holder == 0:
+			world.player(1).position = it.global_position + Vector3(0, 0, 0.8)
+			world.request_grab(it.id)
+			world.request_lid_on(machine.id)
+			return
 
 
 func _run(seconds: float) -> void:
