@@ -34,8 +34,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Power roots: the wall circuit, or any generator item (`gen` in the catalog: pedal / fuel / solar).
   Each root has its own limit; overloading a generator stalls it (or throws the rider off the bike).
 - Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
-- Outside: `scripts/outside.gd` is pure scenery. Plots (`Catalog.PLOTS`) are bought at their sale sign;
-  each has a concrete pad and a fibre pole that works once owned. Plots have no wall power.
+- The town: `scripts/town.gd` is the layout (streets, 37 lots, park, bounds) shared by scenery and gameplay.
+  `scripts/outside.gd` is pure scenery built on it (one subagent-written file, heavily MultiMesh-batched).
+  `scripts/shapes.gd` makes the soft-edged meshes everything uses.
+- Houses (`scripts/house.gd`): one per lot plus our own (id 0). States NEIGHBOUR / OURS / GONE (demolished).
+  Bought by haggling with the neighbour (`offer.gd`, host logic in `world._h_offer`). Each has its own
+  breaker circuit (circuit id = house id, garage = 1000), outlets, router, furniture items.
 - Weather (`Catalog.WEATHER`, decided in `sim.gd`, drawn by `weather.gd`) scales solar output.
 - Planned features and open design questions live in `ROADMAP.md`; known problems in `KNOWN_ISSUES.md`.
 - Collision layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
@@ -53,7 +57,7 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 
 ## Milestones
 1. DONE — walk around together, carry and throw objects
-2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breaker, money, generators, outdoors, plots. Missing: cooling
+2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breakers, money, generators, weather, town, buyable houses. Missing: cooling
 3. Chaos: heat, breakers, leaks, network loops, trip-over cables, sketchy used hardware
 4. Company layer: products, AI models, shop, progression, bigger locations
 5. Polish: glow, sound, UI, balance

@@ -14,8 +14,8 @@ built on a plot (how exactly is still open):
 3. **Fusion reactor.**
 
 Open questions for the reactors:
-- How they get into the world: delivered as a kit and assembled piece by piece? Bought as a whole
-  building on a plot? A dedicated, larger plot type?
+- How they get into the world: delivered as a kit and assembled piece by piece on a demolished lot?
+  Several neighbouring lots merged into one site?
 - What they consume (coal deliveries, fuel rods, startup power for fusion) and who has to carry it.
 - What goes wrong (smoke and neighbours, overheating, meltdown, containment loss) and how recoverable it is.
 - How power leaves them: sockets like a generator, or a plot-wide grid of their own.
@@ -32,3 +32,8 @@ network loops, generator fumes and noise.
 
 ## Company layer (milestone 4)
 Products and AI models, marketing, progression, staff or automation.
+
+## Town and neighbours
+Built: 37 buyable houses, haggling, demolition into a building pad.
+Ideas: neighbours with routines and opinions (complaints about generator noise, power cuts, smoke),
+selling furniture, merging adjacent pads, vehicles for the bigger map, a hardware store you walk to.

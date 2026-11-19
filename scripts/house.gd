@@ -139,6 +139,25 @@ func _build_shell() -> void:
 	_shell.add_child(roof)
 	_shell.add_child(Shapes.instance(Shapes.rounded_box(Vector3(0.6, rise + 0.5, 0.6), 0.05), _mats["wall"],
 			Vector3(hw * 0.5, HEIGHT + rise * 0.5 + 0.3, -hd * 0.3)))
+	# a ceiling lamp per room; without them interiors only get cold light from the sky
+	for x: float in [(-hw + _px) * 0.5, (_px + hw) * 0.5]:
+		var lamp := OmniLight3D.new()
+		lamp.position = Vector3(x, HEIGHT - 0.35, 0)
+		lamp.light_color = Color(1.0, 0.88, 0.7)
+		lamp.light_energy = 1.6
+		lamp.omni_range = 8.0
+		lamp.distance_fade_enabled = true   # only costs anything when someone is near
+		lamp.distance_fade_begin = 30.0
+		lamp.distance_fade_length = 10.0
+		_shell.add_child(lamp)
+		var bulb := SphereMesh.new()
+		bulb.radius = 0.12
+		bulb.height = 0.24
+		var glow := _mat(Color(1.0, 0.92, 0.75), 0.4)
+		glow.emission_enabled = true
+		glow.emission = glow.albedo_color
+		glow.emission_energy_multiplier = 2.5
+		_shell.add_child(Shapes.instance(bulb, glow, Vector3(x, HEIGHT - 0.12, 0)))
 	# doorstep
 	_shell.add_child(Shapes.instance(Shapes.rounded_box(Vector3(1.8, 0.1, 0.9), 0.04), _mats["trim"],
 			Vector3(_door_x, -0.01, hd + 0.5)))

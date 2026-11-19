@@ -119,7 +119,7 @@ func _environment() -> void:
 	sky_mat.sky_top_color = Color(0.22, 0.46, 0.9)
 	sky_mat.sky_horizon_color = Color(0.72, 0.84, 0.96)
 	sky_mat.ground_horizon_color = Color(0.72, 0.84, 0.96)
-	sky_mat.ground_bottom_color = Color(0.25, 0.32, 0.22)
+	sky_mat.ground_bottom_color = Color(0.5, 0.48, 0.45)   # neutral: this tints every ceiling
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
