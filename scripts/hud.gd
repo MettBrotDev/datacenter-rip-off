@@ -10,6 +10,7 @@ const SETTINGS_MENU := "res://scripts/settings_menu.gd"
 const COMPANY_MENU := "res://scripts/company_menu.gd"
 
 var _prompt: Label
+var _prompt_card: PanelContainer
 var _list: VBoxContainer
 var _values: Dictionary = {}    # stat name -> Label
 var _toasts: VBoxContainer
@@ -39,16 +40,6 @@ func _ready() -> void:
 	dot.add_theme_stylebox_override("panel", UI.box(Color(1, 1, 1, 0.85), 3, Color(0, 0, 0, 0.5), 0))
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(dot)
-	var below := CenterContainer.new()
-	below.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(below)
-	_prompt = UI.bold("", 19)
-	_prompt.add_theme_constant_override("outline_size", 8)
-	_prompt.add_theme_color_override("font_outline_color", UI.BG_DARK)
-	_prompt.custom_minimum_size.y = 150
-	_prompt.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	below.add_child(_prompt)
 
 	# crew list, top left
 	var crew := UI.hud_panel(10)
@@ -84,25 +75,17 @@ func _ready() -> void:
 	_toasts.alignment = BoxContainer.ALIGNMENT_END
 	right.add_child(_toasts)
 
-	# key hints, bottom right
-	var hints := UI.hud_panel(8)
-	hints.size_flags_horizontal = Control.SIZE_SHRINK_END
-	hints.size_flags_vertical = Control.SIZE_SHRINK_END
-	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(hints)
-	var keys := HBoxContainer.new()
-	keys.add_theme_constant_override("separation", 14)
-	hints.add_child(keys)
-	for pair: Array in [["WASD", "Move"], ["Shift", "Sprint"], ["Space", "Jump"], ["LMB", "Grab / put down"], ["RMB", "Throw"], ["E", "Interact"], ["Q", "Use"], ["R", "Rotate"],
-			["F", "Power"], ["G", "Network"], ["H", "Coolant"], ["Esc", "Pause"]]:
-		var one := HBoxContainer.new()
-		one.add_theme_constant_override("separation", 5)
-		keys.add_child(one)
-		var cap := PanelContainer.new()
-		cap.add_theme_stylebox_override("panel", UI.box(Color(1, 1, 1, 0.1), 5, Color(1, 1, 1, 0.22), 2))
-		cap.add_child(UI.bold(pair[0], 12, UI.TEXT))
-		one.add_child(cap)
-		one.add_child(UI.label(pair[1], 13, UI.DIM))
+	# what the keys do right now: a small card at the right edge, out of the way of what you are looking at
+	_prompt_card = UI.hud_panel(12)
+	_prompt_card.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_prompt_card.size_flags_vertical = Control.SIZE_SHRINK_END
+	_prompt_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_prompt_card.hide()
+	root.add_child(_prompt_card)
+	_prompt = UI.label("", 15)
+	_prompt.custom_minimum_size.x = 330
+	_prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_prompt_card.add_child(_prompt)
 
 	_shop = Shop.new()
 	_shop.world = get_parent()
@@ -125,6 +108,7 @@ func _ready() -> void:
 
 func set_prompt(text: String) -> void:
 	_prompt.text = text
+	_prompt_card.visible = text != ""
 
 
 func set_players(players: Dictionary) -> void:
