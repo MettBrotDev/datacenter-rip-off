@@ -59,6 +59,7 @@ var profit := 0.0                # $ per second
 var wiring: Dictionary = {}      # circuit id -> watts drawn through that building's wiring
 var puddles: Array = []          # [{"pos", "radius", "left"}] water on the floor
 var doa_chance := 0.12           # host: odds that a used part turns out dead when unpacked
+var hot_swap_chance := 0.25      # host: odds that swapping a part in a powered machine kills the part
 var door_open := false
 var capacity := 0.0             # watts available right now (grid + running generators)
 
@@ -137,6 +138,22 @@ func held_by(peer: int) -> Item:
 		if it.holder == peer:
 			return it
 	return null
+
+
+## Test aid (host): two opened machines full of parts on the driveway, to look at.
+func debug_bench() -> void:
+	var builds := [["server", Vector3(-0.45, 0.3, 6.0), ["cpu_ryzer", "ram_16", "ram_16", "gpu_4070", "gpu_1080"]],
+		["server_4u", Vector3(0.45, 0.3, 6.0), ["cpu_xenon", "cpu_xenon", "ram_64", "ram_64", "ram_64", "gpu_a100", "gpu_a100", "gpu_4090"]]]
+	for build: Array in builds:
+		var machine_id := _next_id
+		_cast(&"_r_spawn", [machine_id, build[0], Transform3D(Basis(), build[1]), [0, 0, 0, 0, 0, false, "", 0, 0, true]])
+		_next_id += 1
+		for kind: String in build[2]:
+			var slot := free_slot(items[machine_id], Catalog.ITEMS[kind]["group"])
+			_cast(&"_r_spawn", [_next_id, kind, Transform3D(Basis(), build[1]), [0, machine_id, slot, 0, 0, false, "", 0, 0, false]])
+			_next_id += 1
+	for kind: String in ["cpu_celery", "ram_8", "gpu_h100", "screwdriver"]:   # loose parts beside them
+		_spawn(kind, Transform3D(Basis(), Vector3(-0.3 + _next_id % 4 * 0.2, 0.3, 6.7)))
 
 
 ## Whatever a cable can be plugged into: an item (id > 0) or a fixture (id < 0).
@@ -249,9 +266,48 @@ func circuit_at(pos: Vector3) -> int:
 
 
 func can_attach(child: Item, par: Item) -> bool:
+	return attach_problem(child, par) == ""
+
+
+## Why `child` cannot be mounted on `par` right now, or "" if it can.
+func attach_problem(child: Item, par: Item) -> String:
 	if par == child or not par.def.has("slots"):
-		return false
-	return par.def["slots"]["accepts"] == child.def.get("group", "") and _free_slot(par) >= 0
+		return "That does not go there"
+	var group: String = child.def.get("group", "")
+	var fits := false
+	for slot: Dictionary in par.def["slots"]:
+		fits = fits or slot["accepts"] == group
+	if not fits:
+		return "A %s has no place for that" % par.label.to_lower()
+	if child.def.get("tier", 0) > par.def.get("max_tier", 99):
+		return "Too advanced for this chassis: it takes parts up to tier %d, this is tier %d" % [par.def["max_tier"], child.def["tier"]]
+	if par.def.get("lid", false) and not par.opened:
+		return "The lid is screwed on. Open it with a screwdriver."
+	if free_slot(par, group) < 0:
+		return "Every %s slot is taken" % Catalog.GROUP_NAMES.get(group, group)
+	return ""
+
+
+## The first empty slot of `par` that takes this group, or the empty one nearest to the world
+## position `near` if that is given and within `reach` metres. -1 if there is none.
+func free_slot(par: Item, group: String, near: Variant = null, reach := 0.2) -> int:
+	var used := {}
+	for it: Item in items.values():
+		if it.parent == par.id:
+			used[it.slot] = true
+	var best := -1
+	var best_dist := reach
+	var slots: Array = par.def["slots"]
+	for s in slots.size():
+		if used.has(s) or slots[s]["accepts"] != group:
+			continue
+		if near == null:
+			return s
+		var dist: float = (par.global_transform * slots[s]["xf"].origin).distance_to(near)
+		if dist < best_dist:
+			best = s
+			best_dist = dist
+	return best
 
 
 func debug_dump() -> String:
@@ -284,8 +340,14 @@ func request_place(xf: Transform3D) -> void:
 	_to_host(&"_h_place", [xf])
 
 
-func request_attach(parent_id: int) -> void:
-	_to_host(&"_h_attach", [parent_id])
+## Mount the held item on `parent_id`. `slot` -1 = the first free slot that takes it.
+func request_attach(parent_id: int, slot := -1) -> void:
+	_to_host(&"_h_attach", [parent_id, slot])
+
+
+## With a screwdriver in hand: open or close a machine's lid.
+func request_lid(id: int) -> void:
+	_to_host(&"_h_lid", [id])
 
 
 ## provider_id 0 = unplug.
@@ -402,7 +464,7 @@ func _owned_ids() -> Array:
 func _spawn_furniture() -> void:
 	for h: House in houses.values():
 		for spot: Array in h.furniture():
-			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true, "", 0, 0]])
+			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true, "", 0, 0, false]])
 			_next_id += 1
 
 
@@ -439,30 +501,34 @@ func name_of(peer: int) -> String:
 # --- host: handlers -----------------------------------------------------------
 
 func _spawn_starting_items() -> void:
-	# laid out side by side on the garage floor: no power but your own legs
+	# laid out side by side on the garage floor: no power but your own legs.
+	# The server already has a CPU and one stick of RAM in it; the GPU you install yourself.
 	var kit := [["server", Vector3(-1.6, 0, -1.2)], ["gpu_1080", Vector3(-0.8, 0, -1.2)],
+		["screwdriver", Vector3(-0.8, 0, -0.8)],
 		["powerstrip", Vector3(-0.1, 0, -1.2)], ["gen_bike", Vector3(1.4, 0, -1.4)],
 		["crate", Vector3(-2.6, 0, -1.4)], ["crate", Vector3(2.8, 0, -1.6)]]
 	for entry: Array in kit:
 		var height: float = Catalog.ITEMS[entry[0]]["size"].y
 		_spawn(entry[0], Transform3D(Basis(), entry[1] + Vector3(0, height * 0.5 + 0.05, 0)))
+	var server: Item = items[1]
+	for kind: String in ["cpu_celery", "ram_8"]:
+		var slot := free_slot(server, Catalog.ITEMS[kind]["group"])
+		_cast(&"_r_spawn", [_next_id, kind, server.global_transform, [0, server.id, slot, 0, 0, false, "", 0, 0, false]])
+		_next_id += 1
 
 
 ## `contains` is only for kind "parcel": the item kind boxed up inside.
 func _spawn(kind: String, xf: Transform3D, contains := "") -> void:
-	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false, contains, 0, 0]])
+	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false, contains, 0, 0, false]])
 	_next_id += 1
 
 
-func _free_slot(par: Item) -> int:
-	var used := {}
-	for it: Item in items.values():
-		if it.parent == par.id:
-			used[it.slot] = true
-	for s in par.def["slots"]["at"].size():
-		if not used.has(s):
-			return s
-	return -1
+## Host: pulling a part out of, or pushing one into, a machine that has power is a gamble.
+func _hot_swap(part: Item, machine: Item, who: String) -> void:
+	if machine.def.get("lid", false) and machine.status & 1 and part.def.get("fragile", false) \
+			and not part.broken and randf() < hot_swap_chance:
+		part.dead = true
+		_cast(&"_r_toast", ["%s hot-swapped a %s with the power on. There was a small blue flash." % [who, part.label.to_lower()]])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -472,7 +538,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains, it.coolant_to, it.worn, it.opened])
 	_r_door.rpc_id(peer, door_open)
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
@@ -494,6 +560,11 @@ func _h_grab(id: int) -> void:
 		return
 	if p.position.distance_to(it.global_position) > 5.0:
 		return
+	var machine: Item = items.get(it.parent)
+	if machine != null:
+		if machine.def.get("lid", false) and not machine.opened:
+			return   # screwed shut
+		_hot_swap(it, machine, name_of(peer))
 	it.rider = 0   # picking up a bike throws its rider off
 	_cast(&"_r_hold", [id, peer])
 
@@ -535,14 +606,37 @@ func _h_place(xf: Transform3D) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _h_attach(parent_id: int) -> void:
+func _h_attach(parent_id: int, slot: int) -> void:
 	if not multiplayer.is_server():
 		return
 	var it := held_by(Net.sender())
 	var par: Item = items.get(parent_id)
 	if it == null or par == null or not can_attach(it, par):
 		return
-	_cast(&"_r_attach", [it.id, parent_id, _free_slot(par)])
+	var group: String = it.def.get("group", "")
+	var slots: Array = par.def["slots"]
+	var taken := false
+	for other: Item in items.values():
+		taken = taken or (other.parent == parent_id and other.slot == slot)
+	if slot < 0 or slot >= slots.size() or slots[slot]["accepts"] != group or taken:
+		slot = free_slot(par, group)   # not a usable slot: take the first free one instead
+	_hot_swap(it, par, name_of(Net.sender()))
+	_cast(&"_r_attach", [it.id, parent_id, slot])
+	_sim_step(0.0)
+
+
+## Unscrew or screw on a machine's lid. Needs a screwdriver in hand.
+@rpc("any_peer", "call_remote", "reliable")
+func _h_lid(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var tool := held_by(Net.sender())
+	var machine: Item = items.get(id)
+	if tool == null or tool.def.get("tool", "") != "screwdriver" or machine == null:
+		return
+	if not machine.def.get("lid", false) or not machine.is_loose():
+		return
+	_cast(&"_r_lid", [id, not machine.opened])
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -968,7 +1062,7 @@ func _sim_step(dt: float) -> void:
 	var gens := {}   # everything with moving parts: generators, pumps, tanks, buckets, servers, hoses
 	for it: Item in items.values():
 		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \
-				or it.def.get("group", "") == "server" or it.coolant_to != 0 or it.hose > 0.0:
+				or it.def.has("psu") or it.coolant_to != 0 or it.hose > 0.0:
 			gens[it.id] = [it.running, it.fuel, it.rider, it.load, it.hose, it.heat]
 	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather,
 		_sim.temps, _sim.outside_temp(), _sim.wiring], status, gens])
@@ -1017,6 +1111,7 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.pinned = st[5]
 	it.coolant_to = st[7]
 	it.worn = st[8]
+	it.opened = st[9]
 	_items.add_child(it)
 	it.global_transform = xf
 	it._pin_xf = xf
@@ -1083,6 +1178,13 @@ func _r_place(id: int, xf: Transform3D) -> void:
 	var it: Item = items.get(id)
 	if it:
 		it.release(xf, Vector3.ZERO, true)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_lid(id: int, open: bool) -> void:
+	var it: Item = items.get(id)
+	if it:
+		it.set_open(open)
 
 
 @rpc("authority", "call_remote", "reliable")

@@ -149,12 +149,24 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		var wired: bool = it.def.get("power_port", false) and not it.def.get("feeds", false)
 		via[it.id] = []
 		root[it.id] = _source(it, world, limit, true, ruined, via[it.id]) if wired and not ruined.has(it.id) else 0
+	# machines: what is screwed into each one, and whether that combination boots at all
+	var inside := {}    # machine id -> [parts mounted in it]
+	for it: Node3D in items.values():
+		var host: Node3D = items.get(it.parent)
+		if host != null and host.def.has("psu"):
+			if not inside.has(host.id):
+				inside[host.id] = []
+			inside[host.id].append(it)
+	var reports := {}   # machine id -> machine_report()
+	for it: Node3D in items.values():
+		if it.def.has("psu"):
+			reports[it.id] = machine_report(it, inside.get(it.id, []), ruined)
 	var loads := {}
 	for it: Node3D in items.values():
 		var feeder: int = _feeder(it, ruined)
 		var r: int = root.get(feeder, 0)
 		if r != 0:
-			var draw: float = it.def.get("watts", 0.0)
+			var draw := _draw(it, reports)
 			loads[r] = loads.get(r, 0.0) + draw
 			for strip: int in via[feeder]:
 				loads[strip] = loads.get(strip, 0.0) + draw
@@ -235,14 +247,12 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	# coolant loops: which pump everything hangs off, and whether water is moving
 	var pump_of := {}   # item id -> pump item id (0 = not on a loop)
 	var flowing := {}   # pump id -> true
-	var gpus := {}      # server id -> [GPUs mounted on it that still work]
+	var gpus := {}      # machine id -> [GPUs in it that are actually working]
 	for it: Node3D in items.values():
 		if it.def.get("coolant_port", false) and not it.def.has("pump") and not it.def.has("tank"):
 			pump_of[it.id] = pump_id(it, world.items)
-		if it.parent != 0 and it.def.get("group", "") == "gpu" and not ruined.has(it.id):
-			if not gpus.has(it.parent):
-				gpus[it.parent] = []
-			gpus[it.parent].append(it)
+		if reports.has(it.id):
+			gpus[it.id] = reports[it.id]["cards"]
 	for pump: Node3D in items.values():
 		if pump.def.has("pump"):
 			var tank := _tank(pump, world)
@@ -256,7 +266,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	watts = 0.0
 	for it: Node3D in items.values():
 		var c: int = world.circuit_at(it.global_position)
-		var draw: float = it.def.get("watts", 0.0) if powered.get(_feeder(it, ruined), false) else 0.0
+		var draw: float = _draw(it, reports) if powered.get(_feeder(it, ruined), false) else 0.0
 		watts += draw
 		var p: int = pump_of.get(it.parent, 0)
 		if draw > 0.0 and it.def.get("liquid", false) and flowing.get(p, false):
@@ -276,7 +286,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 			cooling[c] = [sofar[0] + cool.get("vent", 0.0), sofar[1] + cool.get("remove", 0.0)]
 	_coolant_step(world, pump_of, flowing, into, heat, dt, events)
 	_room_step(world, circuits, heat, cooling, dt, events)
-	_chip_step(world, powered, ruined, pump_of, flowing, gpus, dt, events)
+	_chip_step(world, powered, ruined, pump_of, flowing, reports, dt, events)
 
 	var status := {}
 	var running := {}
@@ -292,7 +302,8 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		elif it.def.has("pump"):
 			bits = 3 if flowing[it.id] else int(powered[it.id])
 		elif it.def.get("net_port", false):
-			var online: bool = powered[it.id] and not it.cooked and _reaches_net(it, world, powered)
+			var boots: bool = reports.get(it.id, {"boots": true})["boots"]   # a switch always "boots"
+			var online: bool = powered[it.id] and boots and not it.cooked and _reaches_net(it, world, powered)
 			bits = int(powered[it.id]) | (int(online) << 1)
 			running[it.id] = online
 		elif powered[it.id]:
@@ -301,12 +312,14 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 
 	tokens = 0.0
 	for it: Node3D in items.values():
-		if it.def.get("group", "") == "server" and running.get(it.id, false):
-			var speed := 0.5 if it.heat >= CHIP_THROTTLE else 1.0
-			tokens += it.def.get("tokens", 0.0) * speed
-			for gpu: Node3D in gpus.get(it.id, []):
-				tokens += gpu.def.get("tokens", 0.0) * speed
-				status[gpu.id] = 3
+		if not reports.has(it.id):
+			continue
+		var report: Dictionary = reports[it.id]
+		var working: bool = running.get(it.id, false)
+		if working:
+			tokens += report["tokens"] * (0.5 if it.heat >= CHIP_THROTTLE else 1.0)
+		for part: Node3D in inside.get(it.id, []):   # lit when doing something, orange when just sitting there
+			status[part.id] = 3 if working and report["running"].has(part.id) else int(powered[it.id])
 	for id: int in ruined:
 		status[id] = 4
 	for it: Node3D in items.values():
@@ -398,20 +411,20 @@ func _room_step(world: Node3D, circuits: Dictionary, heat: Dictionary, cooling: 
 
 ## Chip temperature of every server, and what it does about it.
 func _chip_step(world: Node3D, powered: Dictionary, ruined: Dictionary, pump_of: Dictionary,
-		flowing: Dictionary, gpus: Dictionary, dt: float, events: Array) -> void:
+		flowing: Dictionary, reports: Dictionary, dt: float, events: Array) -> void:
 	var outside := outside_temp()
 	for it: Node3D in world.items.values():
-		if it.def.get("group", "") != "server":
+		if not reports.has(it.id):
 			continue
 		var c: int = world.circuit_at(it.global_position)
 		var room: float = temps.get(c, outside) if c >= 0 and not world.is_outdoors(it.global_position) else outside
 		if it.heat == 0.0:
 			it.heat = room
 		var target := room
-		if powered[it.id] and not ruined.has(it.id):
+		if powered[it.id] and not ruined.has(it.id) and reports[it.id]["boots"]:
 			target = room + CHIP_RISE_IDLE
 			if not it.cooked:
-				var cards: Array = gpus.get(it.id, [])
+				var cards: Array = reports[it.id]["cards"]
 				var fanless := false
 				for gpu: Node3D in cards:
 					fanless = fanless or gpu.def.get("liquid", false)
@@ -455,12 +468,79 @@ func _spread_fire(items: Dictionary, dt: float) -> void:
 				ignite(it)
 
 
-## The item whose power cable decides whether `it` draws anything: itself, or for a GPU the
-## server it is mounted on. Returns 0 if it is ruined.
+## What a machine with these parts screwed into it does. Static, so that any peer can explain a
+## machine to its player. `ruined` = ids known to be dead that may not be flagged on the item yet.
+## Returns {boots, why, tokens, watts, ram, ram_used, cards (working GPUs), running {part id: true},
+## notes [what is wrong with individual parts]}.
+static func machine_report(machine: Node3D, parts: Array, ruined: Dictionary = {}) -> Dictionary:
+	var def: Dictionary = machine.def
+	var cpus: Array = []
+	var gpus: Array = []
+	var sticks: Array = []
+	var ram := 0.0
+	var watts: float = def.get("watts", 0.0)
+	for part: Node3D in parts:
+		if part.broken or ruined.has(part.id):
+			continue
+		watts += part.def.get("watts", 0.0)
+		match part.def.get("group", ""):
+			"cpu":
+				cpus.append(part)
+			"gpu":
+				gpus.append(part)
+			"ram":
+				sticks.append(part)
+				ram += part.def["gb"]
+	var out := {"boots": true, "why": "", "tokens": 0.0, "watts": watts, "ram": ram, "ram_used": 0.0,
+		"cards": [], "running": {}, "notes": []}
+	if cpus.is_empty():
+		out["boots"] = false
+		out["why"] = "No CPU in it"
+	elif sticks.is_empty():
+		out["boots"] = false
+		out["why"] = "No RAM in it"
+	elif watts > def["psu"]:
+		out["boots"] = false
+		out["why"] = "Its power supply gives %d W; the parts in it want %d W" % [def["psu"], watts]
+	if not out["boots"]:
+		out["watts"] = def.get("watts", 0.0)
+		return out
+	var best := 0
+	for cpu: Node3D in cpus:
+		best = maxi(best, cpu.def["tier"])
+		out["tokens"] += cpu.def["tokens"]
+		out["running"][cpu.id] = true
+	for stick: Node3D in sticks:
+		out["running"][stick.id] = true
+	gpus.sort_custom(func(a: Node3D, b: Node3D) -> bool: return a.slot < b.slot)
+	for gpu: Node3D in gpus:
+		var need: float = gpu.def["needs_ram"]
+		if need > ram - out["ram_used"]:
+			out["notes"].append("%s is idle: it needs %d GB of RAM, %d GB are free" % [gpu.label, need, ram - out["ram_used"]])
+			continue
+		out["ram_used"] += need
+		var held_back: bool = best < gpu.def["tier"] - 1
+		if held_back:
+			out["notes"].append("%s runs at half speed: the CPU cannot keep up with it" % gpu.label)
+		out["tokens"] += gpu.def["tokens"] * (0.5 if held_back else 1.0)
+		out["cards"].append(gpu)
+		out["running"][gpu.id] = true
+	return out
+
+
+## Watts an item draws when it has power: parts inside a machine that does not boot draw nothing.
+func _draw(it: Node3D, reports: Dictionary) -> float:
+	if reports.has(it.parent) and not reports[it.parent]["boots"]:
+		return 0.0
+	return it.def.get("watts", 0.0)
+
+
+## The item whose power cable decides whether `it` draws anything: itself, or for a part inside
+## a machine, that machine. Returns 0 if it is ruined.
 func _feeder(it: Node3D, ruined: Dictionary) -> int:
 	if ruined.has(it.id):
 		return 0
-	if it.parent != 0 and it.def.get("group", "") == "gpu":
+	if it.parent != 0 and it.def.get("group", "") in ["cpu", "ram", "gpu"]:
 		return 0 if ruined.has(it.parent) else it.parent
 	return it.id
 

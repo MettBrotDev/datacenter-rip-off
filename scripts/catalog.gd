@@ -2,8 +2,15 @@ extends RefCounted
 ## Game data: every item kind, the shop list and the economy constants.
 ##
 ## Item fields (all optional except label/size/mass/parts):
-##   group       what kind of slot it fits into ("gpu", "server")
-##   slots       {"accepts": group, "at": [Vector3...], "yaw": degrees} — things that mount on it
+##   group       what kind of slot it fits into ("cpu", "ram", "gpu", "server")
+##   slots       [{"accepts": group, "xf": Transform3D}...] — the places things mount on it
+##   lid         has a screwed-on lid: parts go in and out only while it is open (needs a screwdriver)
+##   psu         a machine: watts its power supply delivers; more than that inside and it will not boot
+##   max_tier    a machine: the highest tier of CPU and GPU that fits
+##   tier        a CPU or GPU: 1 (consumer) to 5 (frontier)
+##   needs_ram   a GPU: gigabytes of RAM the machine must have spare for it
+##   gb          a RAM stick: gigabytes
+##   tool        "screwdriver"
 ##   power_port  has a power cable        net_port  has a network cable
 ##   provides    "power" | "net" — other cables can plug into it, up to `sockets`
 ##   feeds       a power inlet: cabled to a generator, it energises the wiring of the building it is in
@@ -36,7 +43,10 @@ const START_MONEY := 1500.0
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
-const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100",
+const SHOP: Array[String] = ["pc_office", "server", "server_ws", "server_4u", "server_pod",
+	"cpu_celery", "cpu_ryzer", "cpu_thread", "cpu_xenon", "cpu_epycc",
+	"ram_8", "ram_16", "ram_32", "ram_64", "ram_256",
+	"gpu_1080", "gpu_4070", "gpu_4090", "gpu_a100", "gpu_h100", "screwdriver",
 	"powerstrip", "switch", "rack", "pump", "reservoir", "radiator", "manifold", "bucket", "suit",
 	"thermometer", "sensor_power", "sensor_coolant", "screen",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp",
@@ -53,8 +63,25 @@ const CATEGORIES: Array[Dictionary] = [
 ]
 
 ## For every part in SHOP: [category key, what the shop says about it].
+const GROUP_NAMES := {"cpu": "CPU", "ram": "RAM", "gpu": "GPU", "server": "server"}
+
 const SHOP_INFO: Dictionary = {
-	"server": ["compute", "Second-hand. One tired CPU, two GPU slots and a past nobody talks about."],
+	"pc_office": ["compute", "Beige. Came out of an accountant's office. Takes one small GPU and judges you."],
+	"server": ["compute", "Second-hand tower server: two GPU slots, four for RAM, and a past nobody talks about."],
+	"server_ws": ["compute", "A proper workstation. The first chassis whose power supply can feed a 4090."],
+	"server_4u": ["compute", "Four GPU slots, two CPU sockets and coolant fittings. This is where it gets serious."],
+	"server_pod": ["compute", "Eight GPUs in one box. Needs a loop, a forklift and a second mortgage."],
+	"cpu_celery": ["compute", "Two cores, both tired. Enough to boot and to hold back anything good."],
+	"cpu_ryzer": ["compute", "Six honest cores. The sensible choice, so nobody brags about it."],
+	"cpu_thread": ["compute", "More cores than you have friends. Runs hot, runs fast."],
+	"cpu_xenon": ["compute", "Server silicon. The box says Gold; the price agrees."],
+	"cpu_epycc": ["compute", "Ninety-six cores. Feeds a rack of H100s without blinking."],
+	"ram_8": ["compute", "One used stick. Somebody else's browser tabs are probably still in it."],
+	"ram_16": ["compute", "Sixteen gigabytes. Enough for a 4070 to stretch its legs."],
+	"ram_32": ["compute", "Thirty-two gigabytes, which is what a 4090 asks for."],
+	"ram_64": ["compute", "Sixty-four gigabytes. Datacenter cards will not start for less."],
+	"ram_256": ["compute", "A quarter of a terabyte on one stick. Server boards only want the best."],
+	"screwdriver": ["workshop", "Opens server lids. Without it your parts are decorations."],
 	"gpu_1080": ["compute", "Somebody mined on this for six years. It still works. Usually."],
 	"gpu_4070": ["compute", "New, sensible, boring. Does what it says on the box."],
 	"gpu_4090": ["compute", "Draws 450 W and looks good doing it. The last card that cools itself."],
@@ -98,9 +125,73 @@ const WEATHER: Array[Dictionary] = [
 static var ITEMS: Dictionary = _build()
 
 
-static func _gpu(label: String, price: int, tokens: float, watts: float, glow: Color) -> Dictionary:
-	return {"label": label, "group": "gpu", "price": price, "tokens": tokens, "watts": watts, "fragile": true,
-		"used": label.contains("used"),
+## A machine: an open metal tray with a mainboard in it and a lid screwed on top.
+## Slots, front to back: CPU sockets front left, a bank of RAM front right, GPUs standing on
+## edge behind them in rows of four. `idle` = watts the bare machine draws.
+static func _chassis(label: String, price: int, size: Vector3, cpus: int, rams: int, gpus: int, psu: float,
+		max_tier: int, idle: float, paint: Color, extra: Dictionary) -> Dictionary:
+	var w := size.x
+	var h := size.y
+	var d := size.z
+	var wall := 0.015
+	var floor_y := -h * 0.5 + wall
+	var boxes := [   # bottom, two sides, front, back: the tray is open on top
+		[Vector3(w, wall, d), Vector3(0, -h * 0.5 + wall * 0.5, 0)],
+		[Vector3(wall, h, d), Vector3(-w * 0.5 + wall * 0.5, 0, 0)],
+		[Vector3(wall, h, d), Vector3(w * 0.5 - wall * 0.5, 0, 0)],
+		[Vector3(w, h, wall), Vector3(0, 0, -d * 0.5 + wall * 0.5)],
+		[Vector3(w, h, wall), Vector3(0, 0, d * 0.5 - wall * 0.5)],
+	]
+	var parts := []
+	for box: Array in boxes:
+		parts.append([box[0], box[1], paint, 0.0])
+	parts.append([Vector3(w - 0.05, 0.004, d - 0.05), Vector3(0, floor_y + 0.002, 0), Color(0.07, 0.28, 0.17), 0.0])   # mainboard
+	parts.append([Vector3(0.1, 0.07, 0.14), Vector3(-w * 0.5 + 0.08, floor_y + 0.04, d * 0.5 - 0.1), Color(0.3, 0.31, 0.34), 0.0])   # power supply
+	parts.append([Vector3(w * 0.8, 0.014, 0.008), Vector3(0, h * 0.22, -d * 0.5 - 0.002), Color(0.7, 0.4, 1.0), 3.0, "led"])
+	parts.append([Vector3(w * 0.8, 0.03, 0.008), Vector3(0, -h * 0.1, -d * 0.5 - 0.002), paint.lightened(0.12), 0.0])
+	var slots := []
+	for i in cpus:
+		slots.append({"accepts": "cpu", "xf": Transform3D(Basis(), Vector3(-w * 0.5 + 0.085 + i * 0.1, floor_y + 0.018, -d * 0.5 + 0.1))})
+	for j in rams:
+		slots.append({"accepts": "ram", "xf": Transform3D(Basis(), Vector3(w * 0.5 - 0.105, floor_y + 0.024, -d * 0.5 + 0.045 + j * 0.02))})
+	var on_edge := Basis(Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0))   # card length along Z, fans facing +X
+	for k in gpus:
+		var row := k / 4
+		var in_row := mini(gpus - row * 4, 4)
+		var x := (k % 4 - (in_row - 1) * 0.5) * 0.085 + 0.04
+		slots.append({"accepts": "gpu", "xf": Transform3D(on_edge, Vector3(x, floor_y + 0.072, -d * 0.5 + 0.37 + row * 0.31))})
+	var def := {"label": label, "group": "server", "price": price, "watts": idle, "psu": psu, "max_tier": max_tier,
+		"power_port": true, "net_port": true, "fragile": true, "lid": true, "slots": slots,
+		"size": size, "mass": 4.0 + size.z * 8.0, "shapes": boxes, "parts": parts,
+		"lid_box": [Vector3(w, wall, d), Vector3(0, h * 0.5 - wall * 0.5, 0), paint.lightened(0.06)]}
+	def.merge(extra, true)
+	return def
+
+
+static func _cpu(label: String, price: int, tier: int, tokens: float, watts: float) -> Dictionary:
+	return {"label": label, "group": "cpu", "price": price, "tier": tier, "tokens": tokens, "watts": watts, "fragile": true,
+		"size": Vector3(0.07, 0.025, 0.07), "mass": 0.1, "parts": [
+			[Vector3(0.07, 0.008, 0.07), Vector3(0, -0.008, 0), Color(0.1, 0.35, 0.2), 0.0],
+			[Vector3(0.052, 0.016, 0.052), Vector3(0, 0.004, 0), Color(0.78, 0.8, 0.84), 0.0],
+			[Vector3(0.012, 0.002, 0.012), Vector3(0.016, 0.013, -0.016), Color(1.0, 0.75, 0.2), 1.5, "led"],
+		]}
+
+
+static func _ram(label: String, price: int, gb: int) -> Dictionary:
+	return {"label": label, "group": "ram", "price": price, "gb": gb, "watts": 3.0, "fragile": true, "used": label.contains("used"),
+		"size": Vector3(0.14, 0.035, 0.012), "mass": 0.05, "parts": [
+			[Vector3(0.14, 0.035, 0.006), Vector3.ZERO, Color(0.1, 0.4, 0.22), 0.0],
+			[Vector3(0.022, 0.018, 0.012), Vector3(-0.045, 0.004, 0), Color(0.06, 0.06, 0.07), 0.0],
+			[Vector3(0.022, 0.018, 0.012), Vector3(-0.015, 0.004, 0), Color(0.06, 0.06, 0.07), 0.0],
+			[Vector3(0.022, 0.018, 0.012), Vector3(0.015, 0.004, 0), Color(0.06, 0.06, 0.07), 0.0],
+			[Vector3(0.022, 0.018, 0.012), Vector3(0.045, 0.004, 0), Color(0.06, 0.06, 0.07), 0.0],
+			[Vector3(0.14, 0.004, 0.008), Vector3(0, -0.017, 0), Color(0.9, 0.75, 0.25), 0.0],
+		]}
+
+
+static func _gpu(label: String, price: int, tier: int, tokens: float, watts: float, needs_ram: int, glow: Color) -> Dictionary:
+	return {"label": label, "group": "gpu", "price": price, "tier": tier, "tokens": tokens, "watts": watts,
+		"needs_ram": needs_ram, "fragile": true, "used": label.contains("used"),
 		"size": Vector3(0.3, 0.05, 0.13), "mass": 1.0, "parts": [
 			[Vector3(0.3, 0.05, 0.13), Vector3.ZERO, Color(0.11, 0.11, 0.13), 0.0],
 			[Vector3(0.3, 0.012, 0.012), Vector3(0, 0.026, 0.06), glow, 2.5, "led"],
@@ -131,20 +222,36 @@ static func _build() -> Dictionary:
 			[Vector3(0.45, 0.35, 0.4), Vector3.ZERO, Color(0.72, 0.55, 0.36), 0.0],
 			[Vector3(0.46, 0.01, 0.07), Vector3(0, 0.172, 0), Color(0.86, 0.79, 0.62), 0.0],
 		]},
-		"server": {"label": "Used server", "group": "server", "price": 300, "tokens": 1.0, "watts": 80.0, "fragile": true,
-			"used": true, "coolant_port": true,
-			"power_port": true, "net_port": true,
-			"slots": {"accepts": "gpu", "yaw": 90.0, "at": [Vector3(-0.12, 0.086, 0), Vector3(0.12, 0.086, 0)]},
-			"size": Vector3(0.48, 0.12, 0.6), "mass": 6.0, "parts": [
-				[Vector3(0.48, 0.12, 0.6), Vector3.ZERO, dark, 0.0],
-				[Vector3(0.42, 0.014, 0.01), Vector3(0, 0.03, -0.301), purple, 3.0, "led"],
-				[Vector3(0.42, 0.03, 0.01), Vector3(0, -0.02, -0.301), Color(0.2, 0.2, 0.24), 0.0],
-			]},
-		"gpu_1080": _gpu("GTX 1080 (used)", 400, 3.0, 180.0, Color(0.2, 1.0, 0.5)),
-		"gpu_4070": _gpu("RTX 4070", 1200, 6.0, 200.0, Color(0.2, 0.8, 1.0)),
-		"gpu_4090": _gpu("RTX 4090", 3500, 14.0, 450.0, Color(1.0, 0.3, 0.6)),
-		"gpu_a100": _liquid(_gpu("A100 80GB", 9000, 30.0, 400.0, Color(0.6, 1.0, 0.2))),
-		"gpu_h100": _liquid(_gpu("H100", 25000, 70.0, 700.0, Color(1.0, 0.8, 0.1))),
+		# --- machines: a chassis with slots; what it does depends on what you screw into it ---
+		"pc_office": _chassis("Office PC (used)", 120, Vector3(0.42, 0.18, 0.45), 1, 2, 1, 350.0, 1, 30.0,
+			Color(0.82, 0.78, 0.68), {"group": "pc", "used": true}),
+		"server": _chassis("Tower server (used)", 300, Vector3(0.48, 0.18, 0.6), 1, 4, 2, 750.0, 2, 40.0,
+			Color(0.1, 0.1, 0.13), {"used": true}),
+		"server_ws": _chassis("Workstation", 1400, Vector3(0.48, 0.19, 0.6), 1, 4, 2, 1300.0, 3, 60.0,
+			Color(0.16, 0.17, 0.2), {}),
+		"server_4u": _chassis("GPU server 4U", 6000, Vector3(0.48, 0.2, 0.6), 2, 8, 4, 3200.0, 4, 100.0,
+			Color(0.12, 0.13, 0.17), {"coolant_port": true}),
+		"server_pod": _chassis("AI pod", 28000, Vector3(0.48, 0.22, 0.86), 2, 8, 8, 7000.0, 5, 150.0,
+			Color(0.2, 0.12, 0.3), {"coolant_port": true}),
+		"cpu_celery": _cpu("Celery G4", 60, 1, 0.5, 35.0),
+		"cpu_ryzer": _cpu("Ryzer 5", 220, 2, 1.0, 65.0),
+		"cpu_thread": _cpu("Threadsmasher", 900, 3, 2.0, 180.0),
+		"cpu_xenon": _cpu("Xenon Gold", 3500, 4, 3.0, 270.0),
+		"cpu_epycc": _cpu("EPYCC 9965", 12000, 5, 5.0, 400.0),
+		"ram_8": _ram("8 GB stick (used)", 20, 8),
+		"ram_16": _ram("16 GB stick", 60, 16),
+		"ram_32": _ram("32 GB stick", 150, 32),
+		"ram_64": _ram("64 GB stick", 400, 64),
+		"ram_256": _ram("256 GB RDIMM", 2000, 256),
+		"gpu_1080": _gpu("GTX 1080 (used)", 400, 1, 3.0, 180.0, 8, Color(0.2, 1.0, 0.5)),
+		"gpu_4070": _gpu("RTX 4070", 1200, 2, 6.0, 200.0, 16, Color(0.2, 0.8, 1.0)),
+		"gpu_4090": _gpu("RTX 4090", 3500, 3, 14.0, 450.0, 32, Color(1.0, 0.3, 0.6)),
+		"gpu_a100": _liquid(_gpu("A100 80GB", 9000, 4, 30.0, 400.0, 64, Color(0.6, 1.0, 0.2))),
+		"gpu_h100": _liquid(_gpu("H100", 25000, 5, 70.0, 700.0, 128, Color(1.0, 0.8, 0.1))),
+		"screwdriver": {"label": "Screwdriver", "price": 10, "tool": "screwdriver", "size": Vector3(0.04, 0.04, 0.24), "mass": 0.2, "parts": [
+			[Vector3(0.04, 0.04, 0.1), Vector3(0, 0, 0.07), Color(0.9, 0.2, 0.15), 0.0],
+			[Vector3(0.012, 0.012, 0.14), Vector3(0, 0, -0.05), Color(0.7, 0.72, 0.76), 0.0],
+		]},
 		"powerstrip": {"label": "Power strip", "price": 25, "power_port": true, "provides": "power", "sockets": 4, "fragile": true,
 			"max_watts": 2000.0,
 			"size": Vector3(0.4, 0.045, 0.07), "mass": 0.6, "parts": [
@@ -364,8 +471,11 @@ static func _build() -> Dictionary:
 			[Vector3(0.26, 0.26, 0.26), Vector3(0.1, 0.38, 0.06), Color(0.3, 0.68, 0.34), 0.0],
 		]},
 		"rack": {"label": "Open rack", "price": 250, "solid": true,
-			"slots": {"accepts": "server", "yaw": 0.0, "at": [
-				Vector3(0, -0.62, 0), Vector3(0, -0.22, 0), Vector3(0, 0.18, 0), Vector3(0, 0.58, 0)]},
+			"slots": [
+				{"accepts": "server", "xf": Transform3D(Basis(), Vector3(0, -0.62, 0))},
+				{"accepts": "server", "xf": Transform3D(Basis(), Vector3(0, -0.22, 0))},
+				{"accepts": "server", "xf": Transform3D(Basis(), Vector3(0, 0.18, 0))},
+				{"accepts": "server", "xf": Transform3D(Basis(), Vector3(0, 0.58, 0))}],
 			"size": Vector3(0.6, 1.8, 0.75), "mass": 25.0,
 			"shapes": [
 				[Vector3(0.6, 0.05, 0.75), Vector3(0, -0.875, 0)], [Vector3(0.6, 0.05, 0.75), Vector3(0, 0.875, 0)],

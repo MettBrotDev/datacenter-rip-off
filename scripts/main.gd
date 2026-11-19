@@ -14,6 +14,8 @@ extends Node
 ##   --demo                 host: give the company a few hours of history (products, a model, users)
 ##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
 ##   --shop                 open the parts market
+##   --bench                host: put two opened, fully fitted machines on the driveway
+##   --pitch=DEG            initial look up (+) or down (-) of the local player
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --port=N               UDP port to host/join on (default 24565)
@@ -106,6 +108,10 @@ func _handle_args() -> void:
 		world._sim_step(0.0)
 	if args.has("company") and world:
 		world.hud.open_company(args["company"] if args["company"] != "" else "overview")
+	if args.has("bench") and world:
+		world.debug_bench()
+	if args.has("pitch") and world:
+		world.player(multiplayer.get_unique_id()).head.rotation.x = deg_to_rad(float(args["pitch"]))
 	if args.has("shop") and world:
 		world.hud.open_shop()
 	if args.has("open") and world:
@@ -137,8 +143,22 @@ func _selftest() -> void:
 	var bike: Node3D = kit["gen_bike"]
 
 	# 1. leg power: GPU on the server, server -> strip -> bike, internet from the wall box
-	world.request_grab(kit["gpu_1080"].id)
-	world.request_attach(server.id)
+	#    The starter server has a CPU and RAM in it, but its lid is screwed on: open it with the
+	#    screwdriver, put the GPU into a slot, close it again.
+	var card: Node3D = kit["gpu_1080"]
+	me.position = server.global_position + Vector3(0, 0, 1.2)
+	world.request_grab(card.id)
+	print("CHECK GPU into a closed server: %s" % world.attach_problem(card, server))
+	world.request_release(false)
+	world.request_grab(kit["screwdriver"].id)
+	world.request_lid(server.id)
+	world.request_release(false)
+	world.request_grab(card.id)
+	world.request_attach(server.id, world.free_slot(server, "gpu"))
+	print("CHECK lid off=%s, GPU sits in slot %d of the server" % [server.opened, card.slot])
+	world.request_grab(kit["screwdriver"].id)
+	world.request_lid(server.id)
+	world.request_release(false)
 	world.request_link(strip.id, "power", bike.id)
 	world.request_link(server.id, "power", strip.id)
 	world.request_link(server.id, "net", -3)
@@ -288,29 +308,45 @@ func _selftest() -> void:
 
 	# 13. liquid cooling. An A100 has no fans: on its own it cooks within seconds.
 	world.request_link(strip.id, "power", _by_kind()["outlet"].id)   # plug the strip back in
-	await _buy(["gpu_a100", "pump", "reservoir", "radiator", "manifold", "bucket"])
+	#     It also needs a machine that can take it: a GPU server with a Xenon and 64 GB.
+	await _buy(["gpu_a100", "pump", "reservoir", "radiator", "manifold", "bucket", "server_4u", "cpu_xenon", "ram_64"])
 	kit = _by_kind()
 	var pump: Node3D = kit["pump"]
 	var tank: Node3D = kit["reservoir"]
-	for step: Array in [["gpu_a100", Vector3(3.0, 0.3, 0.5)], ["pump", Vector3(2.0, 0.2, 3.4)],
+	var big: Node3D = kit["server_4u"]
+	print("CHECK A100 into the old tower server: %s" % world.attach_problem(kit["gpu_a100"], server))
+	for step: Array in [["server_4u", Vector3(2.6, 0.12, 0.4)], ["gpu_a100", Vector3(3.3, 0.3, 1.2)], ["pump", Vector3(2.0, 0.2, 3.4)],
 			["reservoir", Vector3(1.2, 0.4, 3.6)], ["manifold", Vector3(3.2, 0.1, 1.6)],
 			["radiator", Vector3(4.2, 0.55, 5.6)]]:
 		me.position = kit[step[0]].global_position + Vector3(0, 0, -1)
 		world.request_grab(kit[step[0]].id)
 		me.position = Vector3(2.5, 0, 4.2)
 		world.request_place(Transform3D(Basis(), step[1]))
-	me.position = Vector3(3.0, 0, 1.5)
-	world.request_grab(kit["gpu_a100"].id)
-	world.request_attach(server.id)
+	var driver: Node3D = kit["screwdriver"]
+	me.position = driver.global_position + Vector3(0, 0, 1)
+	world.request_grab(driver.id)
+	me.position = Vector3(2.6, 0, 1.6)
+	world.request_lid(big.id)
+	world.request_release(false)
+	for kind: String in ["cpu_xenon", "ram_64", "gpu_a100"]:
+		me.position = kit[kind].global_position + Vector3(0, 0, 1)
+		world.request_grab(kit[kind].id)
+		me.position = Vector3(2.6, 0, 1.6)
+		world.request_attach(big.id)
+	world.request_grab(driver.id)
+	world.request_lid(big.id)
+	world.request_release(false)
+	world.request_link(big.id, "power", strip.id)
+	world.request_link(big.id, "net", -3)
 	await _run(40.0)
-	_check("A100 with no coolant: chips %d °C" % server.heat)
+	_check("A100 with no coolant: chips %d °C" % big.heat)
 
 	#     Build the loop: reservoir <- pump <- manifold <- server, radiator outside, three buckets of water.
 	world.request_link(pump.id, "power", _by_kind()["outlet"].id)
 	world.request_link(pump.id, "coolant", tank.id)
 	world.request_link(kit["manifold"].id, "coolant", pump.id)
 	world.request_link(kit["radiator"].id, "coolant", pump.id)
-	world.request_link(server.id, "coolant", kit["manifold"].id)
+	world.request_link(big.id, "coolant", kit["manifold"].id)
 	me.position = Vector3(3.0, 0, 5.2)
 	world.request_grab(kit["bucket"].id)
 	for trip in 3:
@@ -320,12 +356,12 @@ func _selftest() -> void:
 	world.request_use(pump.id)
 	await _run(120.0)
 	_check("loop running: chips %d °C, coolant %d °C, reservoir %d%%, server hose %d%% full" % [
-		server.heat, pump.heat, tank.fuel * 100.0, server.hose * 100.0])
+		big.heat, pump.heat, tank.fuel * 100.0, big.hose * 100.0])
 
 	#     Pull the server's hose off with the pump running: spray. Then the safe way: pump off, drain, unplug.
-	world.request_link(server.id, "coolant", 0)
+	world.request_link(big.id, "coolant", 0)
 	print("CHECK hose pulled under pressure: puddles=%d server ruined=%s reservoir %d%%" % [
-		world.puddles.size(), server.dead, tank.fuel * 100.0])
+		world.puddles.size(), big.dead, tank.fuel * 100.0])
 	world.request_use(pump.id)
 	world.request_drain(pump.id)
 	await _run(5.0)

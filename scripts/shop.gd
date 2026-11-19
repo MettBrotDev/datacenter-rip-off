@@ -7,7 +7,6 @@ const UI = preload("res://scripts/ui.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const COLORS := {"purple": UI.PURPLE, "amber": UI.AMBER, "cyan": UI.CYAN, "blue": UI.ACCENT, "green": UI.GREEN, "grey": UI.DIM}
 
-const NAMES := {"gpu": "GPU", "server": "server"}
 
 signal closed
 
@@ -294,6 +293,18 @@ func _cat(kind: String) -> Dictionary:
 	return Catalog.CATEGORIES[-1]
 
 
+## "1 CPU, 4 RAM, 2 GPU" for a machine, "4 servers" for a rack.
+func _slot_summary(def: Dictionary) -> String:
+	var counts := {}
+	for slot: Dictionary in def["slots"]:
+		counts[slot["accepts"]] = counts.get(slot["accepts"], 0) + 1
+	var bits: Array[String] = []
+	for group: String in counts:
+		var word: String = Catalog.GROUP_NAMES.get(group, group)
+		bits.append("%d %s%s" % [counts[group], word, "s" if group == "server" and counts[group] != 1 else ""])
+	return ", ".join(bits)
+
+
 ## The one line under a part's name on its card: the number that matters most.
 func _gist(def: Dictionary) -> String:
 	if def.has("gen"):
@@ -306,8 +317,12 @@ func _gist(def: Dictionary) -> String:
 		return "Cools the room  ·  %d W" % def["watts"]
 	if def.has("sockets"):
 		return "%d %s sockets" % [def["sockets"], {"power": "power", "net": "network", "coolant": "hose"}[def["provides"]]]
+	if def.has("psu"):
+		return "%s  ·  %d W supply" % [_slot_summary(def), def["psu"]]
+	if def.has("gb"):
+		return "%d GB" % def["gb"]
 	if def.has("slots"):
-		return "Holds %d %ss" % [def["slots"]["at"].size(), NAMES[def["slots"]["accepts"]]]
+		return "Holds %s" % _slot_summary(def)
 	if def.has("sensor"):
 		return {"room": "Shows a room's temperature", "power": "Shows a power source's load", "coolant": "Shows a coolant loop"}[def["sensor"]]
 	if def.has("watts"):
@@ -333,9 +348,20 @@ func _facts(def: Dictionary) -> Array:
 	if def.has("sockets"):
 		rows.append(["Sockets", "%d (%s)" % [def["sockets"], {"power": "power", "net": "network", "coolant": "coolant hose"}[def["provides"]]]])
 	if def.has("slots"):
-		rows.append(["Holds", "%d %ss" % [def["slots"]["at"].size(), NAMES[def["slots"]["accepts"]]]])
-	if def.get("group", "") == "gpu":
-		rows.append(["Goes on", "a server (two per server)"])
+		rows.append(["Slots", _slot_summary(def)])
+	if def.has("psu"):
+		rows.append(["Power supply", "%s W" % UI.num(def["psu"])])
+		rows.append(["Takes parts up to", "tier %d" % def["max_tier"]])
+	if def.has("tier"):
+		rows.append(["Tier", str(def["tier"])])
+	if def.has("needs_ram"):
+		rows.append(["Needs", "%d GB of RAM" % def["needs_ram"]])
+	if def.has("gb"):
+		rows.append(["Memory", "%d GB" % def["gb"]])
+	if def.get("group", "") == "cpu":
+		rows.append(["Feeds GPUs up to", "tier %d at full speed" % (def["tier"] + 1)])
+	if def.get("group", "") in ["cpu", "ram", "gpu"]:
+		rows.append(["Goes in", "a machine with its lid off"])
 	if def.has("radiator"):
 		rows.append(["Sheds", "%d W per degree above the air" % def["radiator"]])
 	if def.has("cool"):
@@ -356,6 +382,12 @@ func _warnings(def: Dictionary) -> Array:
 	var out := []
 	if def.get("used", false):
 		out.append(["Used: 1 in 8 is dead on arrival", UI.AMBER])
+	if def.get("lid", false):
+		out.append(["Needs a screwdriver to open", UI.ACCENT])
+	if def.has("psu") and not def.get("coolant_port", false):
+		out.append(["No coolant fittings", UI.DIM])
+	if def.get("group", "") == "pc":
+		out.append(["Does not fit in a rack", UI.DIM])
 	if def.get("liquid", false):
 		out.append(["No fans: needs a coolant loop", UI.CYAN])
 	if def.get("fragile", false):

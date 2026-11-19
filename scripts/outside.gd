@@ -286,6 +286,10 @@ func _face_yaw(dir: Vector2) -> float:
 func _slab(rect: Rect2, top: float, col: Color, thick := 0.1) -> void:
 	var c := rect.get_center()
 	_put("flat", Vector3(c.x, top - thick * 0.5, c.y), Vector3(rect.size.x, thick, rect.size.y), col)
+	# Paving sits above the grass, so it needs its own collider: without one, anything put down
+	# on a driveway or sidewalk sinks into it by the height difference.
+	if top > -0.025 and minf(rect.size.x, rect.size.y) > 0.4:
+		_col_box(Vector3(c.x, top - thick * 0.5, c.y), Vector3(rect.size.x, thick, rect.size.y))
 
 
 ## A flat disc / ellipse (diameters in `size`) whose top sits at `top`.

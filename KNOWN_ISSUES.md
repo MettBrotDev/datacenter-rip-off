@@ -33,6 +33,10 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Without a thermometer the HUD shows "? °C" indoors even while you are overheating; the red screen tint is the only warning.
 - Passing out from heat just moves you to the driveway. Nobody has to rescue you.
 - A server with one liquid-cooled card and one ordinary card is treated as fully liquid-cooled.
+- A machine can only be opened while it stands loose, and you have to look into it from above:
+  take it out of the rack first.
+- Power supplies are part of the chassis and cannot be swapped. Machines have no storage drives.
+- Hardware models are still plain boxes; a remodel is planned once the rendering pass is in.
 - Fire does not hurt players, walls or houses, only items. Extinguishers never run out.
 - Ruined hardware cannot be repaired or sold, only thrown in the dumpster.
 - Only sprinting trips over cables; there is no falling animation, just a stumble.
@@ -42,6 +46,9 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Fuel no longer competes with income the way it did; generator running costs need another look.
 
 ## Untested
+- Building a machine by hand: unscrewing the lid with the screwdriver, the ghost snapping to slots,
+  pulling parts back out (the test drives the same requests directly, not the crosshair).
+- Hot-swapping a part with the power on (25% chance to kill it) has never been triggered in a test.
 - The new shop has been looked at but not clicked: category buttons, selecting a part, the quantity
   buttons and Buy (the purchase itself is tested).
 - The company menu has only been looked at, never clicked: every button, the platform share control,

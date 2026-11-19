@@ -4,6 +4,7 @@ extends CharacterBody3D
 
 const Blob = preload("res://scripts/blob.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const Sim = preload("res://scripts/sim.gd")
 const UI = preload("res://scripts/ui.gd")
 const WALK := 4.0
 const SPRINT := 6.5
@@ -314,11 +315,26 @@ func _update_actions() -> void:
 			acts.append(["interact", "[E] Fill the bucket", _world.request_bucket.bind(t.id)])
 		elif held.kind == "bucket" and held.fuel > 0.0 and t is RigidBody3D and t.def.has("tank"):
 			acts.append(["interact", "[E] Pour into the reservoir (%d%% full)" % (t.fuel * 100.0), _world.request_bucket.bind(t.id)])
-		elif t is RigidBody3D and _world.can_attach(held, t):
-			acts.append(["interact", "[E] Mount on %s" % t.label.to_lower(), _world.request_attach.bind(t.id)])
+		elif held.def.get("tool", "") == "screwdriver" and t is RigidBody3D and t.def.get("lid", false):
+			if t.is_loose():
+				acts.append(["interact", "[E] %s" % ("Screw the lid back on" if t.opened else "Unscrew the lid"),
+						_world.request_lid.bind(t.id)])
+			else:
+				acts.append(["", "Take it out of the rack before opening it", Callable()])
 		else:
-			_place_xf = _placement(held)
-			if _place_xf != null:
+			# Parts snap into a free slot of the machine (or rack) you are looking into.
+			var mount := _mount_spot(held, t)
+			if mount.size() == 2:
+				_place_xf = mount[0].global_transform * (mount[0].def["slots"][mount[1]]["xf"] as Transform3D)
+				acts.append(["interact", "[E] Install in the %s" % mount[0].label.to_lower(),
+						_world.request_attach.bind(mount[0].id, mount[1])])
+			elif mount.size() == 1:
+				acts.append(["", mount[0], Callable()])
+			if _place_xf == null:
+				_place_xf = _placement(held)
+			if mount.size() == 2:
+				pass
+			elif _place_xf != null:
 				acts.append(["interact", "[E] Place here", _place])
 				acts.append(["rotate", "[R] Rotate", _rotate])
 			else:
@@ -358,8 +374,8 @@ func _update_actions() -> void:
 					"   kept full by the tap" if t.coolant_to < 0 else "   (bucket, or hose it to a tap)"], Callable()])
 		if t.kind == "bucket":
 			acts.append(["", "Full of water" if t.fuel > 0.0 else "Empty: fill it at a garden tap", Callable()])
-		if t.def.get("group", "") == "server":
-			acts.append(["", "Chips at %d °C%s" % [t.heat, "   THROTTLING" if t.heat >= 85.0 else ""], Callable()])
+		if t.def.has("psu"):
+			_machine_lines(t, acts)
 		if t.broken:
 			acts.append(["", "Water damage. It will never work again.", Callable()])
 		if t.def.has("gen"):
@@ -451,6 +467,46 @@ func _placement(held: Node3D) -> Variant:
 		if space.intersect_shape(query, 1).is_empty():
 			return query.transform
 	return null
+
+
+## Where the held part would be installed: [machine, slot index] when the crosshair is near a
+## free slot that takes it, [reason] when it would fit here but something is in the way,
+## [] when the thing under the crosshair is not somewhere this part mounts at all.
+func _mount_spot(held: Node3D, t: Node3D) -> Array:
+	if not (t is RigidBody3D):
+		return []
+	var machine: Node3D = t if t.def.has("slots") else _world.items.get(t.parent)
+	if machine == null or machine == held or not machine.def.has("slots"):
+		return []
+	var group: String = held.def.get("group", "")
+	var takes := false
+	for slot: Dictionary in machine.def["slots"]:
+		takes = takes or slot["accepts"] == group
+	if not takes:
+		return []
+	var problem: String = _world.attach_problem(held, machine)
+	if problem != "":
+		return [problem]
+	var spot: int = _world.free_slot(machine, group, _ray.get_collision_point(), 0.7 if group == "server" else 0.25)
+	return [machine, spot] if spot >= 0 else ["Aim at an empty %s slot" % Catalog.GROUP_NAMES.get(group, group)]
+
+
+## What a machine says about itself when you look at it.
+func _machine_lines(t: Node3D, acts: Array) -> void:
+	var parts: Array = []
+	for other: Node3D in _world.items.values():
+		if other.parent == t.id:
+			parts.append(other)
+	var report: Dictionary = Sim.machine_report(t, parts)
+	if report["boots"]:
+		acts.append(["", "%.1f tokens/s   %d of %d W   RAM %d of %d GB   chips %d °C%s" % [report["tokens"],
+				report["watts"], t.def["psu"], report["ram_used"], report["ram"], t.heat,
+				"   THROTTLING" if t.heat >= 85.0 else ""], Callable()])
+	else:
+		acts.append(["", "Will not boot: %s" % report["why"], Callable()])
+	for note: String in report["notes"]:
+		acts.append(["", note, Callable()])
+	acts.append(["", "The lid is off: parts go in and out" if t.opened else "Lid screwed on: a screwdriver opens it", Callable()])
 
 
 func _place() -> void:

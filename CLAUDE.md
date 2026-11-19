@@ -36,7 +36,14 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Nothing is validated at build time except socket counts and cable length (7 m, then it gets yanked out).
 - Overloading a generator stalls it (or throws the rider off the bike); its share then lands on the others.
 - Internet comes from the garage's wall box and from the router in every house we own.
-- Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
+- Machines (`psu` in the catalog: office PC, tower server, workstation, GPU server, AI pod) are
+  empty chassis with slots for CPUs, RAM sticks and GPUs (`slots` = [{accepts, xf}]). The lid is
+  screwed on (`Item.opened`, needs the screwdriver tool); parts go in and out only while it is off,
+  and snap to the nearest free slot under the crosshair (`player._mount_spot`, `world.free_slot`).
+  `Sim.machine_report()` (static, used by host and prompts) decides what a build does: no CPU or no
+  RAM or more watts than the power supply = no boot; each GPU needs free RAM; a CPU more than one
+  tier below a GPU halves it; each chassis has a `max_tier`. Swapping parts with the power on can
+  kill them. Machines make tokens while powered AND online.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
 - Heat uses believable numbers. Rooms: every watt used in a building warms its air (`sim._room_step`);
   doors, fans, air conditioners cool it. Chips (`Item.heat` on servers): about 48 C above the room when
@@ -97,8 +104,10 @@ The owner works on this PC while tests run: use `--headless` for everything exce
 Any test flag puts the game in test mode: the mouse is never captured, real mouse and keyboard input is
 ignored (only events tagged with meta "test" count) and a test window never takes focus.
 Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--pos=X,Y,Z`, `--open`,
-`--money=N`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
-- Everything at once: `godot_console --headless --path . -- --host --selftest --money=90000 --weather=0 --probe=18`
+`--money=N`, `--port=N`, `--bench`, `--pitch=DEG`, `--pose=N`, `--shop`, `--company[=TAB]`, `--demo`, `--selftest`,
+`--probe=SECONDS`, `--shot=PATH` (full list at the top of `scripts/main.gd`).
+- Everything at once: `godot_console --headless --path . -- --host --port=24570 --selftest --money=250000 --weather=0 --probe=82`
+  (takes about 90 s; give every parallel run its own `--port`)
   prints one CHECK line per stage (pedal power, shelf placement by key press, wiring the garage via inlet
   and sockets, a lamp, buying and demolishing houses, solar, a wall-mounted socket). Read the CHECK lines.
 - Sync: headless host with `--probe` in the background, then a headless `--join --probe=N`; the two dumps must match.

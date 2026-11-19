@@ -21,6 +21,7 @@ var power_to := 0
 var net_to := 0
 var coolant_to := 0     # what this item's coolant hose is plugged into
 var worn := 0           # heat suit: peer id wearing it
+var opened := false     # machines: the lid is off, parts can go in and out
 var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation
 var contains := ""      # parcels: the item kind inside
 var broken := false     # ruined by rain; set through status bit 2 so every peer shows it
@@ -42,6 +43,8 @@ var load := 0.0         # watts currently drawn from it
 var _world: Node3D
 var _leds: Array = []
 var _light: OmniLight3D   # lamps only
+var _lid: MeshInstance3D            # machines only
+var _lid_shape: CollisionShape3D
 var _screen: Node3D       # ops screens only
 var _fire: Node3D         # flames and their glow, while burning
 var _shell: MeshInstance3D   # heat suit only: the silver shell shown while it is worn
@@ -74,6 +77,20 @@ func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 		add_child(shape)
 	for tagged: Array in Catalog.build_parts(self, def["parts"]):
 		_leds.append(tagged[1])
+	if def.has("lid_box"):   # the lid is its own mesh and collider, so it can come off
+		var lid: Array = def["lid_box"]
+		var lid_shape := BoxShape3D.new()
+		lid_shape.size = lid[0]
+		_lid_shape = CollisionShape3D.new()
+		_lid_shape.shape = lid_shape
+		_lid_shape.position = lid[1]
+		add_child(_lid_shape)
+		var lid_mat := StandardMaterial3D.new()
+		lid_mat.albedo_color = lid[2]
+		lid_mat.roughness = 0.45
+		lid_mat.metallic = 0.4
+		_lid = Catalog.Shapes.instance(Catalog.Shapes.rounded_box(lid[0], 0.006, 1), lid_mat, lid[1])
+		add_child(_lid)
 	if kind == "parcel":   # say what is inside, on the front and the back of the box
 		var size: Vector3 = def["size"]
 		for side: float in [-1.0, 1.0]:
@@ -103,6 +120,7 @@ func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 
 func _ready() -> void:
 	_world = get_parent().get_parent()
+	set_open(opened)
 	if def.get("screen", false):   # an ops screen you can hang anywhere; dark without power
 		_screen = preload("res://scripts/ops_screen.gd").new()
 		_screen.setup(_world.board, def["size"].x - 0.08, false)
@@ -110,6 +128,14 @@ func _ready() -> void:
 		_screen.visible = false
 		add_child(_screen)
 	apply_mode()
+
+
+## Take a machine's lid off or put it back.
+func set_open(open: bool) -> void:
+	opened = open
+	if _lid:
+		_lid.visible = not open
+		_lid_shape.set_deferred("disabled", open)
 
 
 func is_loose() -> bool:
@@ -288,9 +314,7 @@ func _process(dt: float) -> void:
 	elif parent != 0:
 		var par: Node3D = _world.items.get(parent)
 		if par:
-			var slots: Dictionary = par.def["slots"]
-			var local := Transform3D(Basis.from_euler(Vector3(0, deg_to_rad(slots["yaw"]), 0)), slots["at"][slot])
-			global_transform = par.global_transform * local
+			global_transform = par.global_transform * (par.def["slots"][slot]["xf"] as Transform3D)
 	elif pinned:
 		if not global_transform.is_equal_approx(_pin_xf):
 			global_transform = _pin_xf
