@@ -13,6 +13,8 @@ extends RefCounted
 ##   shapes      [[size, offset]...] collision boxes (default: one box of `size`)
 ##   parts       [[size, offset, colour, emission, tag]...] visual boxes; tag "led" = status light
 
+const Shapes = preload("res://scripts/shapes.gd")
+
 const START_MONEY := 1500.0
 const TOKEN_PRICE := 0.25        # $ earned per token
 const POWER_PRICE := 0.0004      # $ paid per watt-second
@@ -172,13 +174,9 @@ static func build_parts(node: Node3D, parts: Array) -> Array:
 			mat.set_meta("color", part[2])
 			mat.set_meta("energy", part[3])
 			tagged.append([part[4], mat])
-		var mesh := BoxMesh.new()
-		mesh.size = part[0]
-		mesh.material = mat
-		var mi := MeshInstance3D.new()
-		mi.mesh = mesh
-		mi.position = part[1]
-		node.add_child(mi)
+		var size: Vector3 = part[0]
+		var soft := clampf(minf(size.x, minf(size.y, size.z)) * 0.3, 0.003, 0.03)
+		node.add_child(Shapes.instance(Shapes.rounded_box(size, soft, 2), mat, part[1]))
 	return tagged
 
 
