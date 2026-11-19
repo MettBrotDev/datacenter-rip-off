@@ -18,7 +18,7 @@ var _shop: Control
 var _heat: ColorRect
 var _heat_text: Label
 var _offer: Control
-var _company: Control   # the company menu (Tab), if that script exists
+var _company: Control   # the company menu (opened at an ops screen), if that script exists
 var _settings: Control
 
 
@@ -94,7 +94,7 @@ func _ready() -> void:
 	keys.add_theme_constant_override("separation", 14)
 	hints.add_child(keys)
 	for pair: Array in [["WASD", "Move"], ["Shift", "Sprint"], ["Space", "Jump"], ["E", "Grab"], ["Q", "Use"], ["R", "Rotate"],
-			["F", "Power"], ["G", "Network"], ["H", "Coolant"], ["Tab", "Company"], ["Esc", "Pause"]]:
+			["F", "Power"], ["G", "Network"], ["H", "Coolant"], ["Esc", "Pause"]]:
 		var one := HBoxContainer.new()
 		one.add_theme_constant_override("separation", 5)
 		keys.add_child(one)
@@ -205,10 +205,12 @@ func offer_reply(house_id: int, text: String, accepted: bool) -> void:
 	_offer.reply(house_id, text, accepted)
 
 
-## The company menu. `tab` is one of "overview", "slop", "products", "lab", "platform", "market".
+## The company menu: only reachable at an ops screen (the console under the garage's big one, or a
+## powered screen item). `tab` is one of "overview", "slop", "products", "lab", "platform", "market".
 func open_company(tab := "overview") -> void:
 	if _company:
 		_company.open(tab)
+		get_parent().request_console(true)   # the board shows who is typing
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
@@ -261,11 +263,8 @@ func _build_pause() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	if e.is_action_pressed("company") and not Net.test_mode and not _shop.visible and not _offer.visible and not _pause.visible:
-		if _company and _company.visible:
-			_close_overlays()
-		else:
-			open_company()
+	if e.is_action_pressed("company") and not Net.test_mode and _company and _company.visible:
+		_close_overlays()   # Tab only closes it: opening needs a console
 		get_viewport().set_input_as_handled()
 	if e.is_action_pressed("ui_cancel") and not Net.test_mode:
 		if _shop.visible or _offer.visible or _pause.visible or (_company and _company.visible):
@@ -281,5 +280,7 @@ func _close_overlays() -> void:
 	_offer.hide()
 	_pause.hide()
 	if _company:
+		if _company.visible:
+			get_parent().request_console(false)
 		_company.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED

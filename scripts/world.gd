@@ -72,6 +72,7 @@ var _players: Node3D
 var _items: Node3D
 var _sim: Sim                   # host only
 var _company: Company           # host only
+var _at_console: Dictionary = {}   # host only: peers who have the company console open
 var _haggle: Dictionary = {}    # host only: house id -> {"reserve", "mood", "until"}
 var _demolish_asked: Dictionary = {}   # host only: house id -> time of the first press
 var _next_id := 1
@@ -399,6 +400,11 @@ func request_fainted() -> void:
 ## A refusal comes back to the asker as a notice (hud.toast).
 func request_company(action: String, args: Array = []) -> void:
 	_to_host(&"_h_company", [action, args])
+
+
+## Tell everyone that we sat down at (or left) the company console: the ops board shows who is typing.
+func request_console(on: bool) -> void:
+	_to_host(&"_h_console", [on])
 
 
 func request_empty_bin() -> void:
@@ -787,6 +793,16 @@ func _h_fainted() -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
+func _h_console(on: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	if on:
+		_at_console[Net.sender()] = true
+	else:
+		_at_console.erase(Net.sender())
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func _h_company(action: String, args: Array) -> void:
 	if not multiplayer.is_server():
 		return
@@ -1058,7 +1074,15 @@ func _sim_step(dt: float) -> void:
 	_sim.money += _company.tick(dt, _sim.tokens, _sim.money, ours, houses[0].state == House.NEIGHBOUR, events)
 	_sim.profit = _company.income
 	_announce(events)
-	_cast(&"_r_company", [_company.state()])
+	var shared := _company.state()
+	var typing: Array[String] = []
+	for peer: int in _at_console.keys():
+		if Net.players.has(peer):
+			typing.append(name_of(peer))
+		else:
+			_at_console.erase(peer)   # left the game with the menu open
+	shared["console"] = typing
+	_cast(&"_r_company", [shared])
 	var gens := {}   # everything with moving parts: generators, pumps, tanks, buckets, servers, hoses
 	for it: Item in items.values():
 		if it.def.has("gen") or it.def.has("pump") or it.def.has("tank") or it.kind == "bucket" \

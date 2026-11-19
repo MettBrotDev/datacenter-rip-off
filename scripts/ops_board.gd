@@ -11,6 +11,7 @@ const WATTS_PER_DEGREE := 1395.0   # heat that flow carries per degree of warmin
 
 var _values: Dictionary = {}    # tile name -> [value label, small label]
 var _weather: Label
+var _typing: Label
 var _sensors: VBoxContainer
 var _alerts: VBoxContainer
 var _earners: VBoxContainer
@@ -42,6 +43,9 @@ func _ready() -> void:
 	var ops := UI.bold("OPS", 54, UI.ACCENT)
 	ops.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(ops)
+	_typing = UI.bold("", 26, UI.AMBER)
+	_typing.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_typing)
 	_weather = UI.label("", 28, UI.DIM)
 	_weather.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(_weather)
@@ -87,6 +91,8 @@ func alert(text: String) -> void:
 func refresh(world: Node3D) -> void:
 	var state: Dictionary = Catalog.WEATHER[world.weather]
 	_weather.text = "%s, %d °C outside" % [state["name"], world.outside_temp]
+	var typing: Array = world.co.get("console", [])
+	_typing.text = "" if typing.is_empty() else "%s %s typing      " % [", ".join(typing), "is" if typing.size() == 1 else "are"]
 	var stored: String = ""
 	var earners: Array[String] = []
 	if not world.co.is_empty():

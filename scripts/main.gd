@@ -434,6 +434,13 @@ func _selftest() -> void:
 	sim.money = saved
 	world._sim_step(0.5)
 	print("CHECK debts paid: overdue=%s garage internet=%s" % [world.co["overdue"], world.fixtures[-3].provides != ""])
+	#      the company menu lives at the ops screens; the board shows who is at a console
+	world.hud.open_company()
+	world._sim_step(0.5)
+	var typing: Array = world.co["console"]
+	world.hud._close_overlays()
+	world._sim_step(0.5)
+	print("CHECK console fixture=%s, at the console: %s, after closing: %s" % [world.fixtures.has(-20), str(typing), str(world.co["console"])])
 
 	# 15. sensors feed the ops board: nothing is listed until they are installed
 	print("CHECK board with no sensors: %s" % str(world.board.readings(world)))

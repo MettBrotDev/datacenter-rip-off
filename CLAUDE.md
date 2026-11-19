@@ -71,7 +71,9 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   Every peer sees `world.co` (= `Company.state()`); actions go through `world.request_company()`.
 - UI: `ui.gd` is the design system (Inter + Material Icons from `fonts/`, loaded at runtime by
   `UI.setup()`; colours, text styles, cards, buttons by kind, chips, pills, bars, tiles). Every screen
-  uses it. `company_menu.gd` is the company menu (Tab): tabs built once and updated in place.
+  uses it. `company_menu.gd` is the company menu: tabs built once and updated in place. It opens only at an
+  ops screen: the console fixture (-20) under the garage's big one (E) or any powered `screen` item (Q).
+  Tab/Esc close it. The board shows who is at a console (`world.co["console"]`).
 - Ops screen: `ops_board.gd` is one SubViewport dashboard shown by every `ops_screen.gd` (a fixed one on
   the garage's back wall, plus the buyable `screen` item). Headline numbers are always on it; details
   need sensors (`sensor` in the catalog: thermometer, power meter, coolant sensor). The same gating
@@ -124,3 +126,14 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 ## Working style
 Main session stays on the top model. Delegate well-specified low-level work to cheaper subagents
 (Sonnet for implementation from a clear spec, Haiku for data tables and boilerplate).
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. When the answer is under a Markdown heading, `graphify section "<heading>"` prints that section's text, so the .md need not be opened. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

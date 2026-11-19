@@ -376,6 +376,11 @@ func _update_actions() -> void:
 			acts.append(["", "Full of water" if t.fuel > 0.0 else "Empty: fill it at a garden tap", Callable()])
 		if t.def.has("psu"):
 			_machine_lines(t, acts)
+		if t.def.get("screen", false):   # every ops screen is also a terminal, as long as it has power
+			if t.status == 3:
+				acts.append(["use", "[Q] Use the company console", _world.hud.open_company])
+			else:
+				acts.append(["", "Dark. Give it power to use the company console here.", Callable()])
 		if t.broken:
 			acts.append(["", "Water damage. It will never work again.", Callable()])
 		if t.def.has("gen"):
@@ -394,6 +399,8 @@ func _update_actions() -> void:
 		match t.kind:
 			"shop":
 				acts.append(["interact", "[E] Open the parts market", _world.hud.open_shop])
+			"console":
+				acts.append(["interact", "[E] Use the company console", _world.hud.open_company])
 			"neighbour":
 				acts.append(["interact", "[E] Talk to %s about buying their house" % t.label, _world.hud.open_offer.bind(t.house)])
 			"hdoor":
