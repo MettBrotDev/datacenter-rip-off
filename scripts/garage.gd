@@ -30,7 +30,8 @@ func _ready() -> void:
 
 	# shell
 	_box(Vector3(W + 2, 1, D + 2), Vector3(0, -0.5, 0), concrete)
-	_box(Vector3(W + 2, 1, D + 2), Vector3(0, H + 0.5, 0), wood)
+	_box(Vector3(W + 2, 1, D + 2), Vector3(0, H + 0.5, 0), brick)
+	_box(Vector3(W, 0.04, D), Vector3(0, H - 0.02, 0), wood, false)   # ceiling lining
 	_box(Vector3(W + 2, H, 1), Vector3(0, H / 2, -D / 2 - 0.5), brick)
 	_box(Vector3(3.8, H, 1), Vector3(-3.6, H / 2, D / 2 + 0.5), brick)    # front wall, left of the door
 	_box(Vector3(3.8, H, 1), Vector3(3.6, H / 2, D / 2 + 0.5), brick)     # right of the door
