@@ -27,16 +27,22 @@ func _ready() -> void:
 	add_child(center)
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	var card := UI.panel(24)
-	card.custom_minimum_size = Vector2(560, 0)
+	var card := UI.panel(28)
+	card.custom_minimum_size = Vector2(600, 0)
 	center.add_child(card)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 14)
 	card.add_child(col)
-	col.add_child(UI.label("SETTINGS", 28))
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	col.add_child(head)
+	head.add_child(UI.chip("tune", UI.ACCENT, 42))
+	var head_text := UI.bold("Settings", 26)
+	head_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(head_text)
+	col.add_child(UI.rule())
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var scroll := UI.scroll()
 	scroll.custom_minimum_size = Vector2(0, 460)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(scroll)
@@ -63,13 +69,13 @@ func _ready() -> void:
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 12)
 	col.add_child(bottom)
-	var reset_btn := UI.button("Reset to defaults")
+	var reset_btn := UI.btn("Reset to defaults", "ghost")
 	reset_btn.pressed.connect(_on_reset)
 	bottom.add_child(reset_btn)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(spacer)
-	var back := UI.button("Back", true)
+	var back := UI.btn("Back", "primary", 17)
 	back.custom_minimum_size = Vector2(140, 0)
 	back.pressed.connect(_close)
 	bottom.add_child(back)
@@ -99,10 +105,9 @@ func _on_reset() -> void:
 # --- row builders ---------------------------------------------------------
 
 func _header(parent: Control, text: String) -> void:
-	var l := UI.label(text, 13, UI.DIM)
-	l.add_theme_constant_override("line_spacing", 0)
+	var l := UI.bold(text, 12, UI.ACCENT.lightened(0.3))
 	var m := MarginContainer.new()
-	m.add_theme_constant_override("margin_top", 6)
+	m.add_theme_constant_override("margin_top", 10)
 	m.add_child(l)
 	parent.add_child(m)
 
@@ -125,10 +130,7 @@ func _slider(parent: Control, key: String, text: String, lo: float, hi: float, s
 	s.step = step
 	s.custom_minimum_size = Vector2(200, 24)
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	s.add_theme_stylebox_override("slider", UI.box(UI.BG_DARK, 4, UI.BORDER, 3))
-	s.add_theme_stylebox_override("grabber_area", UI.box(UI.ACCENT, 4, UI.ACCENT, 3))
-	s.add_theme_stylebox_override("grabber_area_highlight", UI.box(UI.ACCENT.lightened(0.15), 4, UI.ACCENT, 3))
-	s.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	UI.style_slider(s)
 	r.add_child(s)
 	var v := UI.label("", 16, UI.DIM)
 	v.custom_minimum_size = Vector2(64, 0)
@@ -146,7 +148,7 @@ func _slider(parent: Control, key: String, text: String, lo: float, hi: float, s
 func _check(parent: Control, key: String, text: String) -> void:
 	var r := _row(parent, text)
 	var c := CheckButton.new()
-	c.focus_mode = Control.FOCUS_NONE
+	UI.style_check(c)
 	r.add_child(c)
 	_ctl[key] = c
 	c.toggled.connect(func(on: bool) -> void:
@@ -159,15 +161,9 @@ func _option(parent: Control, key: String, text: String, items: Array) -> void:
 	var o := OptionButton.new()
 	o.custom_minimum_size = Vector2(220, 0)
 	o.add_theme_font_size_override("font_size", 16)
-	o.add_theme_stylebox_override("normal", UI.box(UI.BG_DARK, 8, UI.BORDER, 8))
-	o.add_theme_stylebox_override("hover", UI.box(UI.BG_DARK.lightened(0.1), 8, UI.ACCENT, 8))
-	o.add_theme_stylebox_override("pressed", UI.box(UI.BG_DARK, 8, UI.ACCENT, 8))
-	o.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	UI.style_option(o)
 	for t in items:
 		o.add_item(str(t))
-	var popup := o.get_popup()
-	popup.add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, 8, UI.BORDER, 6))
-	popup.add_theme_stylebox_override("hover", UI.box(UI.ACCENT, 6, UI.ACCENT, 4))
 	r.add_child(o)
 	_ctl[key] = o
 	o.item_selected.connect(func(i: int) -> void:

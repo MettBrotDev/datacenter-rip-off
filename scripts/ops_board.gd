@@ -13,6 +13,7 @@ var _values: Dictionary = {}    # tile name -> [value label, small label]
 var _weather: Label
 var _sensors: VBoxContainer
 var _alerts: VBoxContainer
+var _earners: VBoxContainer
 var _footer: Label
 var _log: Array[String] = []
 
@@ -36,8 +37,9 @@ func _ready() -> void:
 
 	var head := HBoxContainer.new()
 	v.add_child(head)
-	head.add_child(UI.label("RIP OFF ", 54))
-	var ops := UI.label("OPS", 54, UI.ACCENT)
+	head.add_child(UI.chip("bolt", UI.ACCENT, 72))
+	head.add_child(UI.bold("   RIP OFF ", 54))
+	var ops := UI.bold("OPS", 54, UI.ACCENT)
 	ops.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(ops)
 	_weather = UI.label("", 28, UI.DIM)
@@ -57,8 +59,8 @@ func _ready() -> void:
 		var tv := VBoxContainer.new()
 		tv.add_theme_constant_override("separation", 0)
 		tile.add_child(tv)
-		tv.add_child(UI.label(stat, 26, UI.DIM))
-		var value := UI.label("-", 60)
+		tv.add_child(UI.bold(stat, 24, UI.DIM))
+		var value := UI.bold("-", 56)
 		tv.add_child(value)
 		var small := UI.label("", 24, UI.DIM)
 		tv.add_child(small)
@@ -69,6 +71,7 @@ func _ready() -> void:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(body)
 	_sensors = _column(body, "SENSORS", 3.0)
+	_earners = _column(body, "TOP EARNERS", 2.0)
 	_alerts = _column(body, "WHAT JUST HAPPENED", 2.0)
 	_footer = UI.label("", 20, UI.DIM)
 	v.add_child(_footer)
@@ -84,13 +87,22 @@ func alert(text: String) -> void:
 func refresh(world: Node3D) -> void:
 	var state: Dictionary = Catalog.WEATHER[world.weather]
 	_weather.text = "%s, %d °C outside" % [state["name"], world.outside_temp]
-	_tile("TOKENS", "%.0f /s" % world.tokens, "", UI.TEXT)
+	var stored: String = ""
+	var earners: Array[String] = []
+	if not world.co.is_empty():
+		stored = "%s stored" % UI.num(world.co["tokens"])
+		var live: Array = (world.co["live"] as Array).duplicate()
+		live.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["peak"] * a["hype"] > b["peak"] * b["hype"])
+		for item: Dictionary in live.slice(0, 4):
+			earners.append("%s  %s/min" % [str(item["name"]).split(" (")[0], UI.money(float(item["peak"]) * float(item["hype"]))])
+	_tile("TOKENS", "%.0f /s" % world.tokens, stored, UI.TEXT)
 	_tile("BALANCE", UI.money(world.money), "", UI.GREEN if world.money >= 0.0 else UI.RED)
 	var short: bool = world.watts > world.capacity or world.tripped
 	_tile("POWER", "%d W" % world.watts, "of %d W available" % world.capacity, UI.RED if short else UI.TEXT)
 	_tile("NET PROFIT", "+%s" % UI.money(world.profit * 60.0), "per minute", UI.GREEN)
 	_fill(_sensors, readings(world), 30, UI.TEXT,
 			"No sensors installed.\nBuy a thermometer, power meter or coolant sensor\nand what they measure shows up here.")
+	_fill(_earners, earners, 24, UI.GREEN, "Nothing is live yet.")
 	_fill(_alerts, _log, 24, UI.DIM, "Nothing yet. Suspicious.")
 	var places: Array[String] = []
 	for c: int in world.circuits():
@@ -146,7 +158,7 @@ func _column(parent: Control, title: String, weight: float) -> VBoxContainer:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
 	panel.add_child(v)
-	v.add_child(UI.label(title, 24, UI.DIM))
+	v.add_child(UI.bold(title, 24, UI.DIM))
 	var lines := VBoxContainer.new()
 	lines.add_theme_constant_override("separation", 4)
 	v.add_child(lines)

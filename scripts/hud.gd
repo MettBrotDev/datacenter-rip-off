@@ -42,7 +42,7 @@ func _ready() -> void:
 	var below := CenterContainer.new()
 	below.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(below)
-	_prompt = UI.label("", 19)
+	_prompt = UI.bold("", 19)
 	_prompt.add_theme_constant_override("outline_size", 8)
 	_prompt.add_theme_color_override("font_outline_color", UI.BG_DARK)
 	_prompt.custom_minimum_size.y = 150
@@ -51,7 +51,7 @@ func _ready() -> void:
 	below.add_child(_prompt)
 
 	# crew list, top left
-	var crew := UI.panel()
+	var crew := UI.hud_panel(10)
 	crew.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	crew.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	crew.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -71,26 +71,38 @@ func _ready() -> void:
 	bar.add_theme_constant_override("separation", 8)
 	right.add_child(bar)
 	for stat: String in ["WEATHER", "HERE", "COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
-		var tile := UI.panel(10)
+		var tile := UI.hud_panel(10)
 		tile.custom_minimum_size.x = 96 if stat == "HERE" else 150
 		bar.add_child(tile)
 		var tv := VBoxContainer.new()
 		tv.add_theme_constant_override("separation", 0)
 		tile.add_child(tv)
-		tv.add_child(UI.label(stat, 12, UI.DIM))
-		_values[stat] = UI.label("-", 21)
+		tv.add_child(UI.bold(stat, 11, UI.DIM))
+		_values[stat] = UI.bold("-", 20)
 		tv.add_child(_values[stat])
 	_toasts = VBoxContainer.new()
 	_toasts.alignment = BoxContainer.ALIGNMENT_END
 	right.add_child(_toasts)
 
 	# key hints, bottom right
-	var hints := UI.panel(10)
+	var hints := UI.hud_panel(8)
 	hints.size_flags_horizontal = Control.SIZE_SHRINK_END
 	hints.size_flags_vertical = Control.SIZE_SHRINK_END
 	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hints)
-	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power   G Network   H Coolant   Tab Company   Esc Pause", 14, UI.DIM))
+	var keys := HBoxContainer.new()
+	keys.add_theme_constant_override("separation", 14)
+	hints.add_child(keys)
+	for pair: Array in [["WASD", "Move"], ["Shift", "Sprint"], ["Space", "Jump"], ["E", "Grab"], ["Q", "Use"], ["R", "Rotate"],
+			["F", "Power"], ["G", "Network"], ["H", "Coolant"], ["Tab", "Company"], ["Esc", "Pause"]]:
+		var one := HBoxContainer.new()
+		one.add_theme_constant_override("separation", 5)
+		keys.add_child(one)
+		var cap := PanelContainer.new()
+		cap.add_theme_stylebox_override("panel", UI.box(Color(1, 1, 1, 0.1), 5, Color(1, 1, 1, 0.22), 2))
+		cap.add_child(UI.bold(pair[0], 12, UI.TEXT))
+		one.add_child(cap)
+		one.add_child(UI.label(pair[1], 13, UI.DIM))
 
 	_shop = Shop.new()
 	_shop.world = get_parent()
@@ -118,13 +130,14 @@ func set_prompt(text: String) -> void:
 func set_players(players: Dictionary) -> void:
 	for c in _list.get_children():
 		c.queue_free()
-	_list.add_child(UI.label("CREW %d/%d" % [players.size(), Net.MAX_PLAYERS], 12, UI.DIM))
+	_list.add_child(UI.bold("CREW %d/%d" % [players.size(), Net.MAX_PLAYERS], 11, UI.DIM))
 	for id: int in players:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		var color_bar := ColorRect.new()
 		color_bar.color = players[id]["color"]
-		color_bar.custom_minimum_size = Vector2(4, 20)
+		color_bar.custom_minimum_size = Vector2(4, 18)
+		color_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(color_bar)
 		row.add_child(UI.label(players[id]["name"] + ("  (host)" if id == 1 else ""), 17))
 		_list.add_child(row)
@@ -181,7 +194,7 @@ func set_weather(index: int) -> void:
 
 
 func toast(text: String) -> void:
-	var p := UI.panel(10)
+	var p := UI.hud_panel(10)
 	p.size_flags_horizontal = Control.SIZE_SHRINK_END
 	p.add_child(UI.label(text, 16))
 	_toasts.add_child(p)
@@ -226,14 +239,15 @@ func _build_pause() -> void:
 	var pc := CenterContainer.new()
 	pc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_pause.add_child(pc)
-	var card := UI.panel(24)
-	card.custom_minimum_size.x = 300
+	var card := UI.panel(28)
+	card.custom_minimum_size.x = 340
 	pc.add_child(card)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	card.add_child(v)
-	v.add_child(UI.label("PAUSED", 28))
-	v.add_child(UI.label("The datacenter keeps running.", 14, UI.DIM))
+	v.add_child(UI.title("Paused"))
+	v.add_child(UI.caption("The datacenter keeps running."))
+	v.add_child(UI.rule())
 	var resume := UI.button("Resume", true)
 	resume.pressed.connect(_close_overlays)
 	v.add_child(resume)

@@ -21,25 +21,36 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(center)
-	var card := UI.panel(24)
-	card.custom_minimum_size.x = 640
+	var card := UI.panel(26)
+	card.custom_minimum_size.x = 680
 	center.add_child(card)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
+	v.add_theme_constant_override("separation", 10)
 	card.add_child(v)
 
 	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
 	v.add_child(head)
-	var title := UI.label("PARTS MARKET", 28)
-	title.size_flags_horizontal = SIZE_EXPAND_FILL
-	head.add_child(title)
-	_balance = UI.label("", 24, UI.GREEN)
-	head.add_child(_balance)
-	v.add_child(UI.label("Dropped off at the garage door. No refunds.", 14, UI.DIM))
+	head.add_child(UI.chip("shopping_cart", UI.ACCENT, 46))
+	var titles := VBoxContainer.new()
+	titles.add_theme_constant_override("separation", -2)
+	titles.size_flags_horizontal = SIZE_EXPAND_FILL
+	head.add_child(titles)
+	titles.add_child(UI.bold("Parts market", 26))
+	titles.add_child(UI.caption("Dropped off at the garage door. No refunds."))
+	var cash := VBoxContainer.new()
+	cash.add_theme_constant_override("separation", -2)
+	head.add_child(cash)
+	var cash_caption := UI.caption("BALANCE")
+	cash_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cash.add_child(cash_caption)
+	_balance = UI.big("", UI.GREEN, 26)
+	_balance.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cash.add_child(_balance)
+	v.add_child(UI.rule())
 
-	var scroll := ScrollContainer.new()
+	var scroll := UI.scroll()
 	scroll.custom_minimum_size.y = 520
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	v.add_child(scroll)
 	var rows := VBoxContainer.new()
 	rows.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -47,26 +58,49 @@ func _ready() -> void:
 	scroll.add_child(rows)
 	for kind: String in Catalog.SHOP:
 		var def: Dictionary = Catalog.ITEMS[kind]
-		var row_panel := PanelContainer.new()
-		row_panel.add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, 8, UI.BORDER, 10))
+		var row_panel := UI.inset(10)
 		rows.add_child(row_panel)
 		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
 		row_panel.add_child(row)
+		row.add_child(UI.chip(_icon_for(def), _color_for(def), 36))
 		var text := VBoxContainer.new()
 		text.size_flags_horizontal = SIZE_EXPAND_FILL
 		text.add_theme_constant_override("separation", 0)
 		row.add_child(text)
-		text.add_child(UI.label(def["label"], 19))
-		text.add_child(UI.label(_describe(def), 14, UI.DIM))
-		var buy := UI.button("+  " + UI.money(def["price"]), true)
+		text.add_child(UI.bold(def["label"], 17))
+		text.add_child(UI.caption(_describe(def)))
+		var buy := UI.btn("+  " + UI.money(def["price"]), "primary", 15)
 		buy.custom_minimum_size.x = 130
 		buy.pressed.connect(func(): world.request_buy(kind))
 		row.add_child(buy)
 		_buttons[kind] = buy
 
-	var close := UI.button("Close  [Esc]")
+	var close := UI.btn("Close  [Esc]", "secondary")
 	close.pressed.connect(func(): closed.emit())
 	v.add_child(close)
+
+
+func _icon_for(def: Dictionary) -> String:
+	if def.has("gen"):
+		return "bolt"
+	if def.get("group", "") == "gpu":
+		return "memory"
+	if def.has("tokens"):
+		return "dns"
+	if def.has("sockets"):
+		return "power"
+	return "inventory_2"
+
+
+func _color_for(def: Dictionary) -> Color:
+	if def.has("gen"):
+		return UI.AMBER
+	if def.has("tokens"):
+		return UI.PURPLE
+	if def.has("sockets"):
+		return UI.CYAN
+	return UI.ACCENT
 
 
 func set_money(money: float) -> void:

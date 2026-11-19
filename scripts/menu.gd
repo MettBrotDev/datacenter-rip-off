@@ -18,28 +18,49 @@ func _ready() -> void:
 	_color_idx = clampi(cfg.get_value("player", "color", 0), 0, Net.PALETTE.size() - 1)
 
 	var bg := ColorRect.new()
-	bg.color = UI.BG_DARK
+	bg.color = UI.BG_PAGE
 	bg.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(bg)
+	var glow := TextureRect.new()   # a soft blue light behind the card
+	var grad := GradientTexture2D.new()
+	grad.fill = GradientTexture2D.FILL_RADIAL
+	grad.fill_from = Vector2(0.5, 0.5)
+	grad.fill_to = Vector2(1.0, 0.5)
+	grad.gradient = Gradient.new()
+	grad.gradient.colors = PackedColorArray([Color(0.1, 0.3, 0.7, 0.35), Color(0.1, 0.3, 0.7, 0.0)])
+	glow.texture = grad
+	glow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	glow.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	add_child(glow)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(center)
-	var card := UI.panel(28)
-	card.custom_minimum_size.x = 460
+	var card := UI.panel(32)
+	card.custom_minimum_size.x = 500
 	center.add_child(card)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
 	card.add_child(v)
 
-	v.add_child(UI.label("DATACENTER RIP OFF", 36))
-	v.add_child(UI.label("A datacenter. What could go wrong.", 16, UI.DIM))
-	v.add_child(_gap(8))
-	v.add_child(UI.label("NAME", 13, UI.DIM))
+	var logo := HBoxContainer.new()
+	logo.add_theme_constant_override("separation", 14)
+	v.add_child(logo)
+	logo.add_child(UI.chip("dns", UI.ACCENT, 56))
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", -2)
+	names.size_flags_vertical = SIZE_SHRINK_CENTER
+	logo.add_child(names)
+	names.add_child(UI.bold("DATACENTER", 26))
+	names.add_child(UI.bold("RIP OFF", 26, UI.ACCENT))
+	v.add_child(UI.caption("A datacenter. What could go wrong.", UI.DIM))
+	v.add_child(UI.rule())
+	v.add_child(UI.bold("NAME", 12, UI.DIM))
 	_name = UI.field("Your name", cfg.get_value("player", "name", ""))
 	_name.max_length = 16
 	v.add_child(_name)
 
-	v.add_child(UI.label("COLOUR", 13, UI.DIM))
+	v.add_child(UI.bold("COLOUR", 12, UI.DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	v.add_child(row)
@@ -52,7 +73,8 @@ func _ready() -> void:
 	_pick_color(_color_idx)
 
 	v.add_child(_gap(8))
-	var host := UI.button("Host a game", true)
+	var host := UI.btn("Host a game", "primary", 18)
+	host.custom_minimum_size.y = 48
 	host.pressed.connect(_host)
 	v.add_child(host)
 	var join_row := HBoxContainer.new()
@@ -95,9 +117,9 @@ func _gap(h: int) -> Control:
 func _pick_color(i: int) -> void:
 	_color_idx = i
 	for j in _swatches.size():
-		var border := Color.WHITE if j == i else Color(0, 0, 0, 0)
+		var border := Color.WHITE if j == i else Color(1, 1, 1, 0.12)
 		var s := UI.box(Net.PALETTE[j], 20, border, 0)
-		s.set_border_width_all(3)
+		s.set_border_width_all(3 if j == i else 1)
 		for state in ["normal", "hover", "pressed", "focus"]:
 			_swatches[j].add_theme_stylebox_override(state, s)
 

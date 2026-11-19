@@ -25,6 +25,7 @@ var menu: Control
 
 
 func _ready() -> void:
+	load("res://scripts/ui.gd").setup()   # fonts and the default UI theme, before any UI exists
 	_setup_input()
 	Net.joined.connect(_on_joined)
 	Net.left.connect(_on_left)

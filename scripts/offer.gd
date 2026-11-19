@@ -28,17 +28,21 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(center)
-	var card := UI.panel(24)
-	card.custom_minimum_size.x = 560
+	var card := UI.panel(26)
+	card.custom_minimum_size.x = 600
 	center.add_child(card)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
 	card.add_child(v)
 
-	_title = UI.label("", 26)
-	v.add_child(_title)
-	var bubble := PanelContainer.new()
-	bubble.add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, 10, UI.BORDER, 14))
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	v.add_child(head)
+	head.add_child(UI.chip("home", UI.AMBER, 44))
+	_title = UI.bold("", 24)
+	_title.size_flags_vertical = SIZE_SHRINK_CENTER
+	head.add_child(_title)
+	var bubble := UI.inset(16, 12)
 	v.add_child(bubble)
 	_line = UI.label("", 19)
 	_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -50,7 +54,7 @@ func _ready() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	v.add_child(row)
-	var less := UI.button("  -  ")
+	var less := UI.btn("  -  ", "secondary", 18)
 	less.pressed.connect(func(): _set_amount(_amount - STEP))
 	row.add_child(less)
 	_slider = HSlider.new()
@@ -58,19 +62,21 @@ func _ready() -> void:
 	_slider.size_flags_horizontal = SIZE_EXPAND_FILL
 	_slider.size_flags_vertical = SIZE_SHRINK_CENTER
 	_slider.value_changed.connect(func(value: float): _set_amount(int(value)))
+	UI.style_slider(_slider)
 	row.add_child(_slider)
-	var more := UI.button("  +  ")
+	var more := UI.btn("  +  ", "secondary", 18)
 	more.pressed.connect(func(): _set_amount(_amount + STEP))
 	row.add_child(more)
-	_offer = UI.label("", 24, UI.GREEN)
+	_offer = UI.big("", UI.GREEN, 24)
 	_offer.custom_minimum_size.x = 130
 	_offer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	row.add_child(_offer)
 
-	_send = UI.button("Make this offer", true)
+	_send = UI.btn("Make this offer", "primary", 17)
+	_send.custom_minimum_size.y = 46
 	_send.pressed.connect(func(): world.request_offer(_house, _amount))
 	v.add_child(_send)
-	var leave := UI.button("Walk away  [Esc]")
+	var leave := UI.btn("Walk away  [Esc]", "ghost")
 	leave.pressed.connect(func(): closed.emit())
 	v.add_child(leave)
 
