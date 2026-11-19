@@ -13,16 +13,18 @@ const LOOKS: Array[Dictionary] = [
 ]
 const DRIFT := 1.5       # cloud speed, m/s
 const SPAN := 260.0      # clouds wrap around after this many metres
+const RAIN_REACH := 18.0 # rain falls within this many metres of the viewer
+const RAIN_TOP := 14.0   # and starts this far above them
 
 var current := -1
-var world: Node3D        # asked whether the camera is under a roof
 
 var _env: Environment
 var _sky: ProceduralSkyMaterial
 var _sun: DirectionalLight3D
 var _clouds: Node3D
 var _cloud_mat: StandardMaterial3D
-var _rain: CPUParticles3D
+var _rain: GPUParticles3D
+var _cover: GPUParticlesCollisionHeightField3D
 
 
 func setup(env: Environment, sky: ProceduralSkyMaterial, sun: DirectionalLight3D) -> void:
@@ -63,20 +65,32 @@ func _ready() -> void:
 	var drop := BoxMesh.new()
 	drop.size = Vector3(0.012, 0.35, 0.012)
 	drop.material = drop_mat
-	_rain = CPUParticles3D.new()
-	_rain.mesh = drop
-	_rain.amount = 900
-	_rain.lifetime = 0.9
-	_rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_rain.emission_box_extents = Vector3(14, 0.5, 14)
-	_rain.direction = Vector3.DOWN
-	_rain.spread = 2.0
-	_rain.initial_velocity_min = 16.0
-	_rain.initial_velocity_max = 20.0
-	_rain.gravity = Vector3.ZERO
+	# Real drops in the world: they start high above whoever is looking and vanish the moment
+	# they touch anything, so it rains outside a window but never under a roof (or a tree).
+	var fall := ParticleProcessMaterial.new()
+	fall.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	fall.emission_box_extents = Vector3(RAIN_REACH, 0.5, RAIN_REACH)
+	fall.direction = Vector3.DOWN
+	fall.spread = 1.5
+	fall.initial_velocity_min = 16.0
+	fall.initial_velocity_max = 20.0
+	fall.gravity = Vector3.ZERO
+	fall.collision_mode = ParticleProcessMaterial.COLLISION_HIDE_ON_CONTACT
+	_rain = GPUParticles3D.new()
+	_rain.process_material = fall
+	_rain.draw_pass_1 = drop
+	_rain.amount = 3000
+	_rain.lifetime = 1.1
+	_rain.visibility_aabb = AABB(Vector3(-RAIN_REACH, -RAIN_TOP - 8, -RAIN_REACH), Vector3(RAIN_REACH * 2, RAIN_TOP + 10, RAIN_REACH * 2))
 	_rain.emitting = false
 	_rain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_rain)
+	# a top-down height map of everything around the viewer, which the drops collide with
+	_cover = GPUParticlesCollisionHeightField3D.new()
+	_cover.size = Vector3(RAIN_REACH * 2 + 4, RAIN_TOP + 10, RAIN_REACH * 2 + 4)
+	_cover.resolution = GPUParticlesCollisionHeightField3D.RESOLUTION_1024
+	_cover.update_mode = GPUParticlesCollisionHeightField3D.UPDATE_MODE_WHEN_MOVED
+	add_child(_cover)
 
 
 func set_weather(index: int) -> void:
@@ -103,5 +117,6 @@ func _process(dt: float) -> void:
 	# rain falls in a box around whoever is looking, and only where there is no roof
 	var cam := get_viewport().get_camera_3d()
 	if cam:
-		_rain.emitting = current == 2 and world.is_outdoors(cam.global_position)
-		_rain.global_position = cam.global_position + Vector3(0, 9, 0)
+		_rain.emitting = current == 2
+		_rain.global_position = cam.global_position + Vector3(0, RAIN_TOP, 0)
+		_cover.global_position = cam.global_position + Vector3(0, RAIN_TOP * 0.5 - 3.0, 0)

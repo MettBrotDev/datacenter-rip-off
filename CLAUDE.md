@@ -38,6 +38,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Internet comes from the garage's wall box and from the router in every house we own.
 - Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
 - Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
+- Purchases arrive outside on the driveway as `parcel` items (`Item.contains` = what is inside) and are
+  unpacked with Q. Parcels are rainproof.
+- Rain ruins `fragile` items (electronics) that are outdoors for 5 s in total: status bit 2, permanent.
+  Outdoors = not under the garage or a standing house (`world.is_outdoors`).
+- The rain you see is GPU particles colliding with a top-down height field around the camera (`weather.gd`),
+  so it falls outside windows and doors but not under roofs.
 - Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
 - The town: `scripts/town.gd` is the layout (streets, 37 lots, park, bounds) shared by scenery and gameplay.
   `scripts/outside.gd` is pure scenery built on it (one subagent-written file, heavily MultiMesh-batched).
@@ -52,7 +58,8 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 
 ## Testing (always do this after changes)
 The owner works on this PC while tests run: use `--headless` for everything except screenshots.
-Any test flag puts the game in test mode (mouse is never captured or read).
+Any test flag puts the game in test mode: the mouse is never captured, real mouse and keyboard input is
+ignored (only events tagged with meta "test" count) and a test window never takes focus.
 Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--pos=X,Y,Z`, `--open`,
 `--money=N`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
 - Everything at once: `godot_console --headless --path . -- --host --selftest --money=90000 --weather=0 --probe=18`

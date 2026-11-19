@@ -122,9 +122,9 @@ func _apply_settings() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not is_local or not _active():
 		return
+	if Net.test_mode and not e.has_meta("test"):
+		return   # automated runs must not react to whoever is using the PC, mouse or keyboard
 	if e is InputEventMouseMotion:
-		if Net.test_mode:
-			return   # automated runs must not react to whoever is using the PC
 		var sens: float = SENS * (_settings.mouse_sens if _settings else 1.0)
 		var flip := -1.0 if _settings and _settings.invert_y else 1.0
 		rotation.y -= e.relative.x * sens
@@ -260,6 +260,10 @@ func _update_actions() -> void:
 			else:
 				acts.append([type, "[%s] Grab %s cable" % [KEYS[type], WORDS[type]],
 						_set_cable.bind({"id": t.id, "type": type})])
+		if t.kind == "parcel":
+			acts.append(["use", "[Q] Unpack", _world.request_unpack.bind(t.id)])
+		if t.broken:
+			acts.append(["", "Water damage. It will never work again.", Callable()])
 		if t.def.has("gen"):
 			_generator_actions(t, acts)
 		if t.def.get("feeds", false) or t.def.get("bus", false):

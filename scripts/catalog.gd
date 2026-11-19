@@ -10,6 +10,7 @@ extends RefCounted
 ##   bus         a wall socket: delivers power from the wiring of the building it is in
 ##   wall        can be mounted on walls as well as put on floors
 ##   light       shines while powered
+##   fragile     electronics: ruined for good by a few seconds of rain (unless still in its parcel)
 ##   watts, tokens   power draw and compute output while running
 ##   gen         {"kind": "pedal" | "fuel" | "solar", "watts": output, "burn": seconds per full tank}
 ##               a power source of its own. pedal = someone rides it, solar = outdoors only
@@ -23,6 +24,7 @@ const START_MONEY := 1500.0
 const TOKEN_PRICE := 0.25        # $ earned per token
 const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
+const RAIN_GRACE := 5.0          # seconds of rain a fragile item survives
 const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp", "crate"]
 
@@ -30,14 +32,15 @@ const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powe
 const WEATHER: Array[Dictionary] = [
 	{"name": "Sunny", "solar": 1.0, "news": "The sun is out: solar panels at full power"},
 	{"name": "Cloudy", "solar": 0.4, "news": "Clouds are rolling in: solar panels down to 40%"},
-	{"name": "Rain", "solar": 0.0, "news": "It's raining: solar panels produce nothing"},
+	{"name": "Rain", "solar": 0.0, "rain": true,
+		"news": "It's raining: solar panels produce nothing, and electronics left outside will be ruined"},
 ]
 
 static var ITEMS: Dictionary = _build()
 
 
 static func _gpu(label: String, price: int, tokens: float, watts: float, glow: Color) -> Dictionary:
-	return {"label": label, "group": "gpu", "price": price, "tokens": tokens, "watts": watts,
+	return {"label": label, "group": "gpu", "price": price, "tokens": tokens, "watts": watts, "fragile": true,
 		"size": Vector3(0.3, 0.05, 0.13), "mass": 1.0, "parts": [
 			[Vector3(0.3, 0.05, 0.13), Vector3.ZERO, Color(0.11, 0.11, 0.13), 0.0],
 			[Vector3(0.3, 0.012, 0.012), Vector3(0, 0.026, 0.06), glow, 2.5, "led"],
@@ -55,7 +58,7 @@ static func _build() -> Dictionary:
 			[Vector3(0.45, 0.35, 0.4), Vector3.ZERO, Color(0.72, 0.55, 0.36), 0.0],
 			[Vector3(0.46, 0.01, 0.07), Vector3(0, 0.172, 0), Color(0.86, 0.79, 0.62), 0.0],
 		]},
-		"server": {"label": "Used server", "group": "server", "price": 300, "tokens": 1.0, "watts": 80.0,
+		"server": {"label": "Used server", "group": "server", "price": 300, "tokens": 1.0, "watts": 80.0, "fragile": true,
 			"power_port": true, "net_port": true,
 			"slots": {"accepts": "gpu", "yaw": 90.0, "at": [Vector3(-0.12, 0.086, 0), Vector3(0.12, 0.086, 0)]},
 			"size": Vector3(0.48, 0.12, 0.6), "mass": 6.0, "parts": [
@@ -66,7 +69,7 @@ static func _build() -> Dictionary:
 		"gpu_1080": _gpu("GTX 1080 (used)", 400, 3.0, 180.0, Color(0.2, 1.0, 0.5)),
 		"gpu_4070": _gpu("RTX 4070", 1200, 6.0, 200.0, Color(0.2, 0.8, 1.0)),
 		"gpu_4090": _gpu("RTX 4090", 3500, 14.0, 450.0, Color(1.0, 0.3, 0.6)),
-		"powerstrip": {"label": "Power strip", "price": 25, "power_port": true, "provides": "power", "sockets": 4,
+		"powerstrip": {"label": "Power strip", "price": 25, "power_port": true, "provides": "power", "sockets": 4, "fragile": true,
 			"size": Vector3(0.4, 0.045, 0.07), "mass": 0.6, "parts": [
 				[Vector3(0.4, 0.045, 0.07), Vector3.ZERO, Color(0.9, 0.9, 0.87), 0.0],
 				[Vector3(0.03, 0.02, 0.04), Vector3(-0.17, 0.025, 0), Color(1.0, 0.15, 0.1), 2.0, "led"],
@@ -75,7 +78,7 @@ static func _build() -> Dictionary:
 				[Vector3(0.04, 0.004, 0.04), Vector3(0.08, 0.023, 0), socket, 0.0],
 				[Vector3(0.04, 0.004, 0.04), Vector3(0.16, 0.023, 0), socket, 0.0],
 			]},
-		"switch": {"label": "Network switch", "price": 60, "watts": 5.0, "power_port": true, "net_port": true,
+		"switch": {"label": "Network switch", "price": 60, "watts": 5.0, "power_port": true, "net_port": true, "fragile": true,
 			"provides": "net", "sockets": 4,
 			"size": Vector3(0.28, 0.045, 0.16), "mass": 0.8, "parts": [
 				[Vector3(0.28, 0.045, 0.16), Vector3.ZERO, Color(0.13, 0.18, 0.3), 0.0],
@@ -141,7 +144,7 @@ static func _build() -> Dictionary:
 				[Vector3(0.06, 0.06, 0.012), Vector3(0.045, 0, -0.02), Color(0.12, 0.12, 0.14), 0.0],
 				[Vector3(0.02, 0.02, 0.012), Vector3(0, 0.045, -0.02), Color(0.2, 1.0, 0.5), 3.0, "led"],
 			]},
-		"lamp": {"label": "Floor lamp", "price": 60, "watts": 40.0, "power_port": true, "light": true,
+		"lamp": {"label": "Floor lamp", "price": 60, "watts": 5.0, "power_port": true, "light": true, "fragile": true,
 			"size": Vector3(0.36, 1.6, 0.36), "mass": 4.0, "parts": [
 				[Vector3(0.32, 0.04, 0.32), Vector3(0, -0.78, 0), Color(0.15, 0.15, 0.17), 0.0],
 				[Vector3(0.04, 1.3, 0.04), Vector3(0, -0.13, 0), Color(0.6, 0.62, 0.66), 0.0],
@@ -161,7 +164,7 @@ static func _build() -> Dictionary:
 			[Vector3(0.7, 0.12, 0.55), Vector3(-0.4, 0.05, -0.1), Color(0.42, 0.58, 0.72), 0.0],
 			[Vector3(0.7, 0.12, 0.55), Vector3(0.4, 0.05, -0.1), Color(0.42, 0.58, 0.72), 0.0],
 		]},
-		"tv": {"label": "Television", "size": Vector3(1.3, 0.9, 0.35), "mass": 14.0, "parts": [
+		"tv": {"label": "Television", "fragile": true, "size": Vector3(1.3, 0.9, 0.35), "mass": 14.0, "parts": [
 			[Vector3(1.3, 0.4, 0.35), Vector3(0, -0.25, 0), Color(0.45, 0.3, 0.18), 0.0],
 			[Vector3(1.2, 0.5, 0.06), Vector3(0, 0.2, 0), Color(0.05, 0.05, 0.06), 0.0],
 			[Vector3(1.1, 0.42, 0.01), Vector3(0, 0.2, -0.033), Color(0.3, 0.5, 0.9), 0.7],
@@ -210,6 +213,20 @@ static func _build() -> Dictionary:
 				[Vector3(0.02, 1.7, 0.02), Vector3(0.29, 0, -0.37), purple, 2.0],
 			]},
 	}
+
+
+## The cardboard box a purchase arrives in: sized to fit, labelled, and rainproof.
+static func parcel(kind: String) -> Dictionary:
+	var inside: Dictionary = ITEMS[kind]
+	var fit: Vector3 = inside["size"]
+	var size := Vector3(maxf(fit.x + 0.08, 0.3), maxf(fit.y + 0.08, 0.2), maxf(fit.z + 0.08, 0.3))
+	var tape := Color(0.86, 0.79, 0.62)
+	return {"label": "Parcel: %s" % inside["label"], "size": size, "mass": inside["mass"] + 0.5,
+		"solid": inside.get("solid", false), "parts": [
+			[size, Vector3.ZERO, Color(0.72, 0.55, 0.36), 0.0],
+			[Vector3(size.x + 0.006, 0.006, minf(0.07, size.z * 0.3)), Vector3(0, size.y * 0.5, 0), tape, 0.0],
+			[Vector3(minf(0.07, size.x * 0.3), size.y + 0.006, size.z + 0.006), Vector3.ZERO, tape, 0.0],
+		]}
 
 
 ## Adds one MeshInstance3D per part to `node`. Returns the materials of tagged parts as [[tag, material]].

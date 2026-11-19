@@ -202,7 +202,7 @@ func _build_pause() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	if e.is_action_pressed("ui_cancel"):
+	if e.is_action_pressed("ui_cancel") and not Net.test_mode:
 		if _shop.visible or _offer.visible or _pause.visible:
 			_close_overlays()
 		else:

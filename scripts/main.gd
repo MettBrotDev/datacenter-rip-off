@@ -71,6 +71,8 @@ func _handle_args() -> void:
 		Net.my_color = Net.PALETTE[absi(hash(Net.my_name)) % Net.PALETTE.size()]
 	Net.bot = args.has("bot")
 	Net.test_mode = args.has("bot") or args.has("probe") or args.has("shot") or args.has("selftest")
+	if Net.test_mode and DisplayServer.get_name() != "headless":
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)   # never take the keyboard
 	if args.has("pos"):
 		var xyz: PackedStringArray = args["pos"].split(",")
 		Net.test_pos = Vector3(float(xyz[0]), float(xyz[1]), float(xyz[2]))
@@ -121,15 +123,20 @@ func _selftest() -> void:
 	_check("pedalling")
 	world.request_use(bike.id)
 
-	# 2. rack, then placement through the real key path: carry the server, look at the front
-	#    edge of the middle shelf board and press E
-	world.request_buy("rack")
-	await _wait(1.0)
+	# 2. a rack arrives as a parcel on the driveway: unpack it, carry it in, mount the server,
+	#    then pull the server out again and put it on the shelf through the real key path
+	await _buy(["rack"])
+	var rack: Node3D = _by_kind()["rack"]
+	me.position = Vector3(-1, 0, 5)
+	world.request_grab(rack.id)
+	world.request_place(Transform3D(Basis(), Vector3(-3.0, 0.92, 2.0)))
+	me.position = server.global_position + Vector3(0, 0, 1.5)
 	world.request_grab(server.id)
-	world.request_attach(_by_kind()["rack"].id)
+	world.request_attach(rack.id)
 	await _wait(0.2)
-	me.position = server.global_position + Vector3(0, 0, -1.5)
-	world.request_grab(server.id)   # pull it back out of the rack
+	print("CHECK server in the rack: parent=%d rack at %.1v" % [server.parent, rack.global_position])
+	me.position = Vector3(-1.5, 0, 1.0)
+	world.request_grab(server.id)
 	me.position = Vector3(2.5, 0, -1.0)
 	me.rotation.y = -PI / 2
 	me.head.rotation.x = -0.24
@@ -137,20 +144,21 @@ func _selftest() -> void:
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_E
 	key.pressed = true
+	key.set_meta("test", true)   # the player ignores every other key press during test runs
 	Input.parse_input_event(key)
 	await _wait(0.3)
 	print("CHECK server on the shelf: at %.1v pinned=%s" % [server.global_position, server.pinned])
 
-	# 3. wire the garage: a mower generator feeding a power inlet, wall sockets delivering it
-	for kind: String in ["gen_mower", "fuel", "inlet", "outlet", "lamp"]:
-		world.request_buy(kind)
-	await _wait(0.4)
+	# 3. wire the garage: a mower generator outside feeding a power inlet, wall sockets inside
+	await _buy(["gen_mower", "fuel", "inlet", "outlet", "lamp"])
 	kit = _by_kind()
-	me.position = Vector3(0, 0, 1.0)
+	me.position = Vector3(0.5, 0, 5.5)
 	world.request_grab(kit["inlet"].id)
 	world.request_place(Transform3D(Basis(), Vector3(3.6, 0.13, 3.2)))
 	world.request_grab(kit["outlet"].id)
 	world.request_place(Transform3D(Basis(), Vector3(1.0, 0.07, 2.4)))
+	world.request_grab(kit["lamp"].id)
+	world.request_place(Transform3D(Basis(), Vector3(-1.0, 0.81, 3.0)))
 	world.request_link(kit["inlet"].id, "power", kit["gen_mower"].id)
 	world.request_link(strip.id, "power", 0)
 	world.request_link(strip.id, "power", kit["outlet"].id)
@@ -171,24 +179,53 @@ func _selftest() -> void:
 	world.request_demolish(16)
 	world.request_demolish(16)
 
-	# 5. solar: carry a panel out onto the lawn; what it adds depends on the weather
-	world.request_buy("gen_solar")
-	await _wait(0.4)
-	me.position = Vector3(6, 0, 3)
+	# 5. solar: carry a panel onto the lawn; what it adds depends on the weather
+	await _buy(["gen_solar"])
+	me.position = Vector3(4, 0, 6)
 	world.request_grab(_by_kind()["gen_solar"].id)
-	world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 2)))
+	world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 4)))
 	await _wait(0.6)
 	_check("solar panel on the lawn")
 
 	# 6. a second socket mounted on the garage's left wall, 1 m up: it must stay there
-	world.request_buy("outlet")
-	await _wait(0.4)
-	me.position = Vector3(-2, 0, 1)
+	await _buy(["outlet"])
+	me.position = Vector3(-1.5, 0, 4.5)
 	var socket: Node3D = _by_kind()["outlet"]
 	world.request_grab(socket.id)
 	world.request_place(Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-4.47, 1.0, 1.0)))
 	await _wait(1.3)
 	print("CHECK socket on the wall: at %.2v pinned=%s live=%s" % [socket.global_position, socket.pinned, socket.status == 3])
+
+	# 7. weather: a GPU left unpacked on the driveway and one still in its parcel. Only rain ruins
+	#    anything, and only the unpacked one.
+	await _buy(["gpu_4070"])
+	world.request_buy("gpu_4090")
+	await _wait(7.0)
+	var ruined: Array[String] = []
+	for it: Node3D in world.items.values():
+		if it.broken:
+			ruined.append(it.kind)
+	print("CHECK after 7 s outdoors: ruined=%s parcels still closed=%d" % [ruined, _count("parcel")])
+
+
+## Buys things, then walks to the driveway and unpacks every parcel there.
+func _buy(kinds: Array) -> void:
+	for kind: String in kinds:
+		world.request_buy(kind)
+	await _wait(0.4)
+	world.player(1).position = Vector3(0, 0, 8)
+	for it: Node3D in world.items.values().duplicate():
+		if it.kind == "parcel":
+			world.request_unpack(it.id)
+	await _wait(0.2)
+
+
+func _count(kind: String) -> int:
+	var n := 0
+	for it: Node3D in world.items.values():
+		if it.kind == kind:
+			n += 1
+	return n
 
 
 func _wait(seconds: float) -> void:

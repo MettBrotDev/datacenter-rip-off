@@ -24,7 +24,8 @@ Open questions for the reactors:
 
 ## Weather
 Built: sunny / cloudy / rain, changing every 1.5-4 minutes, scaling solar output (100% / 40% / 0%).
-Ideas: day and night, wind (and wind turbines), rain damaging hardware left outside, storms tripping things.
+Also built: rain falls only where there is no roof, and ruins unpacked electronics left outside.
+Ideas: day and night, wind (and wind turbines), storms, tarps or carports to shelter a pad, drying or repairing wet hardware.
 
 ## Chaos layer (milestone 3)
 Heat and fire, tripping over cables, sketchy used hardware, melting power strips, coolant leaks,

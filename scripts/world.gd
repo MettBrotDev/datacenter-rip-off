@@ -74,7 +74,6 @@ func _ready() -> void:
 	_build_houses()
 	_weather = Weather.new()
 	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
-	_weather.world = self
 	add_child(_weather)
 	_players = Node3D.new()
 	_players.name = "Players"
@@ -217,6 +216,11 @@ func request_buy(kind: String) -> void:
 	_to_host(&"_h_buy", [kind])
 
 
+## Open a delivered parcel: the box is gone, the thing inside stands in its place.
+func request_unpack(id: int) -> void:
+	_to_host(&"_h_unpack", [id])
+
+
 func request_breaker(circuit: int) -> void:
 	_to_host(&"_h_breaker", [circuit])
 
@@ -274,7 +278,7 @@ func _owned_ids() -> Array:
 func _spawn_furniture() -> void:
 	for h: House in houses.values():
 		for spot: Array in h.furniture():
-			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true]])
+			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true, ""]])
 			_next_id += 1
 
 
@@ -318,8 +322,9 @@ func _spawn_starting_items() -> void:
 		_spawn(entry[0], Transform3D(Basis(), entry[1] + Vector3(0, height * 0.5 + 0.05, 0)))
 
 
-func _spawn(kind: String, xf: Transform3D) -> void:
-	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false]])
+## `contains` is only for kind "parcel": the item kind boxed up inside.
+func _spawn(kind: String, xf: Transform3D, contains := "") -> void:
+	_cast(&"_r_spawn", [_next_id, kind, xf, [0, 0, 0, 0, 0, false, contains]])
 	_next_id += 1
 
 
@@ -341,7 +346,7 @@ func _h_snapshot() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	for it: Item in items.values():
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
-				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
+				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned, it.contains])
 	_r_door.rpc_id(peer, door_open)
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
@@ -442,11 +447,31 @@ func _h_buy(kind: String) -> void:
 	if _sim.money < def["price"]:
 		return
 	_sim.money -= def["price"]
-	var slot := _deliveries % 14
+	# dropped off as a parcel on the driveway, in the next free-ish slot of a 5 x 3 grid
+	var slot := _deliveries % 15
 	_deliveries += 1
-	var pos := Vector3(-3.0 + (slot % 7) * 1.0, 0.3 + def["size"].y * 0.5, 2.0 + (slot / 7) * 1.0)
-	_spawn(kind, Transform3D(Basis(), pos))
+	var height: float = Catalog.parcel(kind)["size"].y
+	var pos := Vector3(-2.0 + (slot % 5) * 1.0, height * 0.5 + 0.15, 7.0 + (slot / 5) * 1.2)
+	_spawn("parcel", Transform3D(Basis(), pos), kind)
 	_cast(&"_r_toast", ["%s bought %s (-%s)" % [name_of(Net.sender()), def["label"], UI.money(def["price"])]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_unpack(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var box: Item = items.get(id)
+	var p := player(Net.sender())
+	if box == null or p == null or box.kind != "parcel" or box.holder != 0:
+		return
+	if p.position.distance_to(box.global_position) > 5.0:
+		return
+	var inside: String = box.contains
+	var lift: float = (Catalog.ITEMS[inside]["size"].y - box.def["size"].y) * 0.5 + 0.02
+	var xf := Transform3D(Basis(Vector3.UP, box.global_rotation.y), box.global_position + Vector3(0, lift, 0))
+	_cast(&"_r_despawn", [id])
+	_spawn(inside, xf)
 	_sim_step(0.0)
 
 
@@ -647,7 +672,7 @@ func _on_item_sleep(it: Item) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	var it := Item.new()
-	it.setup(id, kind)
+	it.setup(id, kind, st[6])
 	it.name = str(id)
 	it.holder = st[0]
 	it.parent = st[1]

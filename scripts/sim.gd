@@ -43,6 +43,21 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		events.append(Catalog.WEATHER[weather]["news"])
 	var sun: float = Catalog.WEATHER[weather]["solar"]
 
+	# rain ruins electronics that are outdoors and not in a parcel (parcels are a different item kind)
+	var raining: bool = Catalog.WEATHER[weather].get("rain", false)
+	var ruined := {}
+	for it: Node3D in items.values():
+		if it.broken:
+			ruined[it.id] = true
+		elif it.def.get("fragile", false):
+			if raining and world.is_outdoors(it.global_position):
+				it.wet += dt
+				if it.wet >= Catalog.RAIN_GRACE:
+					ruined[it.id] = true
+					events.append("A %s got rained on. It is ruined." % it.label.to_lower())
+			else:
+				it.wet = maxf(0.0, it.wet - dt)
+
 	# generators: which are producing, and how much each can give
 	var limit := {}
 	for it: Node3D in items.values():
@@ -56,7 +71,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	for it: Node3D in items.values():
 		if it.def.get("feeds", false) and it.holder == 0:
 			var c: int = world.circuit_at(it.global_position)
-			var g := _source(it, world, limit, false)
+			var g := _source(it, world, limit, false, ruined)
 			if c >= 0 and g > 0:
 				feeding[it.id] = true
 				if not feeders.has(c):
@@ -68,12 +83,12 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	var root := {}
 	for it: Node3D in items.values():
 		var wired: bool = it.def.get("power_port", false) and not it.def.get("feeds", false)
-		root[it.id] = _source(it, world, limit, true) if wired else 0
+		root[it.id] = _source(it, world, limit, true, ruined) if wired and not ruined.has(it.id) else 0
 	var loads := {}
 	for it: Node3D in items.values():
 		var r: int = root[it.id]
 		if it.parent != 0 and it.def.get("group", "") == "gpu":
-			r = root.get(it.parent, 0)   # GPUs draw through the server they sit on
+			r = 0 if ruined.has(it.id) else root.get(it.parent, 0)   # GPUs draw through the server they sit on
 		if r != 0:
 			loads[r] = loads.get(r, 0.0) + it.def.get("watts", 0.0)
 
@@ -145,7 +160,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	for it: Node3D in items.values():   # what is actually being served, counted once
 		var r: int = root[it.id]
 		if it.parent != 0 and it.def.get("group", "") == "gpu":
-			r = root.get(it.parent, 0)
+			r = 0 if ruined.has(it.id) else root.get(it.parent, 0)
 		if r != 0 and not dead.has(r):
 			watts += it.def.get("watts", 0.0)
 
@@ -173,9 +188,11 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		var group: String = it.def.get("group", "")
 		if group == "server" and running.get(it.id, false):
 			tokens += it.def.get("tokens", 0.0)
-		elif group == "gpu" and it.parent != 0 and running.get(it.parent, false):
+		elif group == "gpu" and it.parent != 0 and running.get(it.parent, false) and not ruined.has(it.id):
 			tokens += it.def.get("tokens", 0.0)
 			status[it.id] = 3
+	for id: int in ruined:
+		status[id] = 4
 
 	profit = tokens * Catalog.TOKEN_PRICE   # power is paid for in fuel, sweat or weather
 	money += profit * dt
@@ -207,11 +224,11 @@ func _generating(it: Node3D, world: Node3D) -> bool:
 ## the key of the building whose wall socket the chain ends in, or 0 for nothing.
 ## A chain that loops back on itself (strip plugged into itself...) never gets anywhere.
 ## Inlets pass via_sockets = false: a building cannot be fed from another building's socket.
-func _source(it: Node3D, world: Node3D, limit: Dictionary, via_sockets: bool) -> int:
+func _source(it: Node3D, world: Node3D, limit: Dictionary, via_sockets: bool, ruined: Dictionary) -> int:
 	var cur := it
 	for hop in 16:
 		var next: Node3D = world.items.get(cur.power_to) if cur.power_to > 0 else null
-		if next == null or next.provides != "power":
+		if next == null or next.provides != "power" or ruined.has(next.id):
 			return 0
 		if next.def.has("gen"):
 			return next.id if limit.has(next.id) else 0
@@ -233,7 +250,7 @@ func _reaches_net(it: Node3D, world: Node3D, powered: Dictionary) -> bool:
 			var fixture: Node3D = world.fixtures.get(to)
 			return fixture != null and fixture.provides == "net"
 		var next: Node3D = world.items.get(to)
-		if next == null or next.provides != "net" or not powered.get(next.id, false):
+		if next == null or next.provides != "net" or next.broken or not powered.get(next.id, false):
 			return false
 		cur = next
 	return false

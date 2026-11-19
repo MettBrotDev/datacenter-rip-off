@@ -19,7 +19,10 @@ var slot := 0
 var pinned := false     # placed deliberately: stays exactly put (no physics) until grabbed or unsupported
 var power_to := 0
 var net_to := 0
-var status := -1        # bit 0 powered, bit 1 online; set by the host's simulation
+var status := -1        # bit 0 powered, bit 1 online, bit 2 ruined; set by the host's simulation
+var contains := ""      # parcels: the item kind inside
+var broken := false     # ruined by rain; set through status bit 2 so every peer shows it
+var wet := 0.0          # host only: seconds of rain soaked up so far
 # generators only (the host simulates these and replicates them twice a second)
 var running := false    # fuel generators: switched on
 var fuel := 0.0         # 0..1 tank level
@@ -35,10 +38,12 @@ var _has_target := false
 var _pin_xf := Transform3D.IDENTITY
 
 
-func setup(p_id: int, p_kind: String) -> void:
+## `p_contains` is only for kind "parcel": the item kind boxed up inside.
+func setup(p_id: int, p_kind: String, p_contains := "") -> void:
 	id = p_id
 	kind = p_kind
-	def = Catalog.ITEMS[kind]
+	contains = p_contains
+	def = Catalog.parcel(contains) if kind == "parcel" else Catalog.ITEMS[kind]
 	label = def["label"]
 	provides = def.get("provides", "")
 	sockets = def.get("sockets", 0)
@@ -56,6 +61,20 @@ func setup(p_id: int, p_kind: String) -> void:
 		add_child(shape)
 	for tagged: Array in Catalog.build_parts(self, def["parts"]):
 		_leds.append(tagged[1])
+	if kind == "parcel":   # say what is inside, on the front and the back of the box
+		var size: Vector3 = def["size"]
+		for side: float in [-1.0, 1.0]:
+			var text := Label3D.new()
+			text.text = Catalog.ITEMS[contains]["label"]
+			text.font_size = 36
+			text.pixel_size = 0.0018
+			text.width = size.x * 0.85 / text.pixel_size
+			text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			text.modulate = Color(0.2, 0.14, 0.08)
+			text.outline_size = 0
+			text.position = Vector3(size.x * -0.2 * side, size.y * 0.2, (size.z * 0.5 + 0.006) * side)
+			text.rotation.y = 0.0 if side > 0.0 else PI
+			add_child(text)
 	if def.get("light", false):
 		_light = OmniLight3D.new()
 		_light.position.y = def["size"].y * 0.4
@@ -99,10 +118,24 @@ func set_status(bits: int) -> void:
 	if bits == status:
 		return
 	status = bits
+	if bits & 4 and not broken:
+		_ruin()
 	if _light:
 		_light.visible = bits == 3
 	for mat: StandardMaterial3D in _leds:
-		Catalog.set_light(mat, 2 if bits == 3 else (1 if bits & 1 else 0))
+		Catalog.set_light(mat, 2 if bits == 3 else (1 if bits == 1 else 0))
+
+
+## Rained on: dead for good. It still exists as scorched junk you can carry around.
+func _ruin() -> void:
+	broken = true
+	label = "Ruined %s" % def["label"].to_lower()
+	for child: Node in get_children():
+		var mesh := child as MeshInstance3D
+		if mesh and mesh.material_override is StandardMaterial3D:
+			var mat: StandardMaterial3D = mesh.material_override
+			mat.albedo_color = mat.albedo_color.darkened(0.6).lerp(Color(0.25, 0.2, 0.15), 0.4)
+			mat.roughness = 1.0
 
 
 func release(xf: Transform3D, vel: Vector3, pin := false) -> void:
