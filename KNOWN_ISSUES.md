@@ -36,6 +36,10 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Ruined hardware cannot be repaired or sold, only thrown in the dumpster.
 - Only sprinting trips over cables; there is no falling animation, just a stumble.
 
+- The economy is unbalanced: every number in `company_data.gd` is a first guess that nobody has played.
+- At the start there is no income until you have tokens to sell: the first minutes are pedalling for $0.10 a token.
+- Fuel no longer competes with income the way it did; generator running costs need another look.
+
 ## Untested
 - Breaker trip and reset, and one generator stalling so its share lands on another (written, never triggered in a test).
 - Fuel running out, and wiring a bought house (written, never triggered in a test; only the garage was wired).

@@ -48,6 +48,12 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   Pumps can drain their hoses first. Puddles (`world.puddles`) ruin electronics standing in them.
 - People: above 50 C (deliberately generous) the local player's `exposure` builds up; at 100% they pass out and wake on the
   driveway. A worn heat suit (`Item.worn`) prevents it and slows walking.
+- Money: servers only make TOKENS. `company.gd` (host only, rules) and `company_data.gd` (all content
+  and numbers) turn them into money: selling raw on a swinging spot market (worst deal), slop (cheap,
+  short-lived income), products (size and launch-style choices, updatable, can be rushed or cancelled),
+  training your own model generations (multiplies everything, can fail), and an API platform with
+  marketing campaigns. Lifetime earnings set the funding stage, which unlocks content, slots and storage.
+  Every peer sees `world.co` (= `Company.state()`); actions go through `world.request_company()`.
 - Ops screen: `ops_board.gd` is one SubViewport dashboard shown by every `ops_screen.gd` (a fixed one on
   the garage's back wall, plus the buyable `screen` item). Headline numbers are always on it; details
   need sensors (`sensor` in the catalog: thermometer, power meter, coolant sensor). The same gating
@@ -92,7 +98,7 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 1. DONE — walk around together, carry and throw objects
 2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breakers, money, generators, weather, town, buyable houses. Missing: cooling
 3. MOSTLY DONE — heat, liquid cooling, leaks, fire, extinguisher, strip overload, tripping, dud parts, heat suit. Missing: network loops, generator fumes and noise
-4. Company layer: products, AI models, shop, progression, bigger locations
+4. STARTED — company layer rules (tokens, slop, products, models, platform, funding stages). Menu UI in progress
 5. Polish: glow, sound, UI, balance
 
 ## Working style

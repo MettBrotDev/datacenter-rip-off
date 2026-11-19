@@ -34,7 +34,10 @@ Next: network loops, generator fumes and noise, a mop, throwing buckets of water
 immersion cooling in a paddling pool.
 
 ## Company layer (milestone 4)
-Products and AI models, marketing, progression, staff or automation.
+Built: tokens as a currency, the raw token market, slop, products, model training, the API platform,
+funding stages, random company events.
+Needs: balancing (nothing has been played), staff or automation, more events, a way to lose
+(debt? investors?), research that unlocks hardware, the reactors' reason to exist (megawatt compute).
 
 ## Town and neighbours
 Built: 38 buyable houses (including the landlady's, next to the garage), haggling, demolition into a building pad.
