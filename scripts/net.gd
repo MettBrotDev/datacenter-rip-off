@@ -15,6 +15,7 @@ const PALETTE: Array[Color] = [
 
 var players: Dictionary = {}   # peer id -> {"name": String, "color": Color}
 var pstates: Dictionary = {}   # peer id -> [position: Vector3, yaw: float, pitch: float]
+var port := PORT              # test flag --port=N changes it
 var my_name := "Player"
 var my_color := PALETTE[0]
 var in_session := false
@@ -33,8 +34,8 @@ func _ready() -> void:
 
 func host() -> String:
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_server(PORT, MAX_PLAYERS - 1) != OK:
-		return "Port %d is already in use" % PORT
+	if peer.create_server(port, MAX_PLAYERS - 1) != OK:
+		return "Port %d is already in use" % port
 	multiplayer.multiplayer_peer = peer
 	players = {1: {"name": my_name, "color": my_color}}
 	in_session = true
@@ -45,7 +46,7 @@ func host() -> String:
 
 func join(address: String) -> String:
 	var peer := ENetMultiplayerPeer.new()
-	if peer.create_client(address, PORT) != OK:
+	if peer.create_client(address, port) != OK:
 		return "Invalid address"
 	multiplayer.multiplayer_peer = peer
 	return ""
