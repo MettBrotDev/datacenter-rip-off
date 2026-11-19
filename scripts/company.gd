@@ -283,6 +283,8 @@ func info(key: String) -> Dictionary:
 func use_model(key: String, money: float) -> String:
 	if info(key).is_empty():
 		return "No such model"
+	if key not in owned and info(key)["rent"] < 0:
+		return "%s cannot be rented: buy the weights or do without" % info(key)["name"]
 	if key not in owned and money <= 0.0:
 		return "No money, no licence"
 	active = key
@@ -296,6 +298,8 @@ func buy_model(key: String, money: float) -> String:
 	if key in owned:
 		return "Already ours"
 	var price: float = Data.MODELS[key]["price"]
+	if price < 0.0:
+		return "%s is not for sale: subscription only" % Data.MODELS[key]["name"]
 	if price > money:
 		return "Needs $%d" % price
 	owned.append(key)
