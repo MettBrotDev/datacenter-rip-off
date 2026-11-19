@@ -13,15 +13,19 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - A neighbour who sold their house simply vanishes.
 - Demolition is instant: no animation, no rubble, no cost.
 - Furniture cannot be sold or thrown away for money.
-- Houses have no back door and no upstairs. Interior lamps are always on and need no power.
+- Houses have no back door and no upstairs.
+- A building cannot be powered from another building's wall socket; an inlet must lead to a generator.
+- Fuel is so cheap compared with what hardware earns that running out is the only real cost. Needs balancing.
+- Playing alone, the opening is awkward: the only free power is the bike, and you cannot pedal and work at once.
 - Generators have no downsides yet (no noise, fumes or fire). There is weather but no day/night.
-- Rain is only drawn while you stand outside the garage; it also falls "through" house roofs while you are in a house.
+- Rain stops being drawn while you stand under a roof, so you never see it through a window or an open door. Seen from outside, it still falls through other buildings' roofs.
 - Rain does nothing to hardware left outside.
 - A pedalling player is glued to the bike but has no sitting pose.
 
 ## Untested
-- Breaker trip and reset (written, never triggered in a test).
-- Fuel running out, and powering hardware from a bought house's outlets (written, never triggered in a test).
+- Breaker trip and reset, and one generator stalling so its share lands on another (written, never triggered in a test).
+- Fuel running out, and wiring a bought house (written, never triggered in a test; only the garage was wired).
+- Mounting things on walls by looking at them (the test places the socket by coordinates, not by crosshair).
 - The offer screen, front doors and walking around the town have never been tried by hand.
 - Performance of the big town on a weaker PC than the owner's RTX 5090.
 - Cable yanked out at 7 m (written, never triggered in a test).

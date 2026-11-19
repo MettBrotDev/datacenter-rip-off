@@ -6,6 +6,10 @@ extends RefCounted
 ##   slots       {"accepts": group, "at": [Vector3...], "yaw": degrees} — things that mount on it
 ##   power_port  has a power cable        net_port  has a network cable
 ##   provides    "power" | "net" — other cables can plug into it, up to `sockets`
+##   feeds       a power inlet: cabled to a generator, it energises the wiring of the building it is in
+##   bus         a wall socket: delivers power from the wiring of the building it is in
+##   wall        can be mounted on walls as well as put on floors
+##   light       shines while powered
 ##   watts, tokens   power draw and compute output while running
 ##   gen         {"kind": "pedal" | "fuel" | "solar", "watts": output, "burn": seconds per full tank}
 ##               a power source of its own. pedal = someone rides it, solar = outdoors only
@@ -17,11 +21,10 @@ const Shapes = preload("res://scripts/shapes.gd")
 
 const START_MONEY := 1500.0
 const TOKEN_PRICE := 0.25        # $ earned per token
-const POWER_PRICE := 0.0004      # $ paid per watt-second
-const BREAKER_WATTS := 3600.0    # the garage's single circuit
+const BREAKER_WATTS := 3600.0    # what the garage's wiring can carry before its breaker trips
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack",
-	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "crate"]
+	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "inlet", "outlet", "lamp", "crate"]
 
 ## Weather states. `solar` scales what a solar panel can deliver.
 const WEATHER: Array[Dictionary] = [
@@ -80,7 +83,7 @@ static func _build() -> Dictionary:
 			]},
 		# --- power generation, from scuffed to serious ---
 		"gen_bike": {"label": "Exercise bike generator", "price": 150, "provides": "power", "sockets": 1,
-			"gen": {"kind": "pedal", "watts": 250.0},
+			"gen": {"kind": "pedal", "watts": 300.0},
 			"size": Vector3(0.5, 1.0, 1.1), "mass": 18.0, "parts": [
 				[Vector3(0.5, 0.06, 1.1), Vector3(0, -0.47, 0), Color(0.2, 0.2, 0.23), 0.0],
 				[Vector3(0.08, 0.7, 0.08), Vector3(0, -0.1, 0.25), Color(0.85, 0.2, 0.2), 0.0],
@@ -123,6 +126,26 @@ static func _build() -> Dictionary:
 				[Vector3(0.1, 0.4, 0.1), Vector3(0.25, 0.6, -0.5), Color(0.3, 0.3, 0.33), 0.0],
 				[Vector3(0.5, 0.25, 0.02), Vector3(0, 0.2, -0.705), Color(0.1, 0.1, 0.12), 0.0],
 				[Vector3(0.3, 0.03, 0.01), Vector3(0, 0.25, -0.72), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		# --- building wiring: nothing is powered unless you bring the power in yourself ---
+		"inlet": {"label": "Power inlet", "price": 40, "wall": true, "power_port": true, "feeds": true,
+			"size": Vector3(0.24, 0.24, 0.09), "mass": 1.0, "parts": [
+				[Vector3(0.24, 0.24, 0.07), Vector3(0, 0, 0.01), Color(0.15, 0.35, 0.8), 0.0],
+				[Vector3(0.14, 0.14, 0.03), Vector3(0, 0, -0.035), Color(0.1, 0.1, 0.12), 0.0],
+				[Vector3(0.04, 0.04, 0.02), Vector3(0.08, 0.08, -0.03), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"outlet": {"label": "Wall socket", "price": 15, "wall": true, "provides": "power", "sockets": 2, "bus": true,
+			"size": Vector3(0.2, 0.12, 0.05), "mass": 0.3, "parts": [
+				[Vector3(0.2, 0.12, 0.04), Vector3(0, 0, 0.005), Color(0.92, 0.92, 0.9), 0.0],
+				[Vector3(0.06, 0.06, 0.012), Vector3(-0.045, 0, -0.02), Color(0.12, 0.12, 0.14), 0.0],
+				[Vector3(0.06, 0.06, 0.012), Vector3(0.045, 0, -0.02), Color(0.12, 0.12, 0.14), 0.0],
+				[Vector3(0.02, 0.02, 0.012), Vector3(0, 0.045, -0.02), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"lamp": {"label": "Floor lamp", "price": 60, "watts": 40.0, "power_port": true, "light": true,
+			"size": Vector3(0.36, 1.6, 0.36), "mass": 4.0, "parts": [
+				[Vector3(0.32, 0.04, 0.32), Vector3(0, -0.78, 0), Color(0.15, 0.15, 0.17), 0.0],
+				[Vector3(0.04, 1.3, 0.04), Vector3(0, -0.13, 0), Color(0.6, 0.62, 0.66), 0.0],
+				[Vector3(0.36, 0.3, 0.36), Vector3(0, 0.65, 0), Color(1.0, 0.9, 0.7), 2.5, "led"],
 			]},
 		"fuel": {"label": "Jerry can", "price": 40, "size": Vector3(0.3, 0.4, 0.16), "mass": 4.0, "parts": [
 			[Vector3(0.3, 0.36, 0.16), Vector3(0, -0.02, 0), Color(0.75, 0.1, 0.08), 0.0],

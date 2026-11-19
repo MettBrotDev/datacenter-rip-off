@@ -15,7 +15,6 @@ const Sim = preload("res://scripts/sim.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const UI = preload("res://scripts/ui.gd")
 const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3(1.5, 0, 2), Vector3(0, 0, 1)]
-const DELIVERY := Vector3(2.6, 1.0, 1.8)   # next to the roller door
 const SIM_STEP := 0.5
 const Weather = preload("res://scripts/weather.gd")
 const House = preload("res://scripts/house.gd")
@@ -59,6 +58,7 @@ var _sim: Sim                   # host only
 var _haggle: Dictionary = {}    # host only: house id -> {"reserve", "mood", "until"}
 var _demolish_asked: Dictionary = {}   # host only: house id -> time of the first press
 var _next_id := 1
+var _deliveries := 0            # host only: purchases so far, picks the drop-off slot
 var _tick := 0
 var _sim_t := 0.0
 
@@ -74,6 +74,7 @@ func _ready() -> void:
 	_build_houses()
 	_weather = Weather.new()
 	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
+	_weather.world = self
 	add_child(_weather)
 	_players = Node3D.new()
 	_players.name = "Players"
@@ -144,13 +145,27 @@ func is_outdoors(pos: Vector3) -> bool:
 	return true
 
 
-## Breaker circuits we can use: circuit id -> [limit in watts, where it is].
+## The wiring of every building we own: circuit id -> [limit in watts, where it is].
 func circuits() -> Dictionary:
 	var out := {GARAGE_CIRCUIT: [Catalog.BREAKER_WATTS, "the garage"]}
 	for h: House in houses.values():
 		if h.state != House.NEIGHBOUR:
-			out[h.id] = [Town.CIRCUIT_WATTS[h.lot["size"]], "our house" if h.id == 0 else "%s' old place" % h.lot["name"]]
+			out[h.id] = [Town.CIRCUIT_WATTS[h.lot["size"]], "the old house of %s" % h.lot["name"]]
 	return out
+
+
+## Which building's wiring a power inlet or wall socket at this spot belongs to; -1 for none.
+func circuit_at(pos: Vector3) -> int:
+	if absf(pos.x) < 5.5 and absf(pos.z) < 4.5:
+		return GARAGE_CIRCUIT
+	for h: House in houses.values():
+		if h.state == House.NEIGHBOUR:
+			continue
+		var local := h.to_local(pos)
+		var half: Vector2 = (Town.CLEAR_SIZE if h.state == House.GONE else Town.FOOTPRINTS[h.lot["size"]]) * 0.5
+		if absf(local.x) < half.x and absf(local.z) < half.y:
+			return h.id
+	return -1
 
 
 func can_attach(child: Item, par: Item) -> bool:
@@ -294,10 +309,13 @@ func name_of(peer: int) -> String:
 # --- host: handlers -----------------------------------------------------------
 
 func _spawn_starting_items() -> void:
-	var pile := ["server", "gpu_1080", "powerstrip", "crate", "crate"]
-	for i in pile.size():
-		var pos := Vector3(randf_range(-1.0, 1.0), 0.4 + i * 0.3, randf_range(-1.4, -0.4))
-		_spawn(pile[i], Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos))
+	# laid out side by side on the garage floor: no power but your own legs
+	var kit := [["server", Vector3(-1.6, 0, -1.2)], ["gpu_1080", Vector3(-0.8, 0, -1.2)],
+		["powerstrip", Vector3(-0.1, 0, -1.2)], ["gen_bike", Vector3(1.4, 0, -1.4)],
+		["crate", Vector3(-2.6, 0, -1.4)], ["crate", Vector3(2.8, 0, -1.6)]]
+	for entry: Array in kit:
+		var height: float = Catalog.ITEMS[entry[0]]["size"].y
+		_spawn(entry[0], Transform3D(Basis(), entry[1] + Vector3(0, height * 0.5 + 0.05, 0)))
 
 
 func _spawn(kind: String, xf: Transform3D) -> void:
@@ -326,7 +344,7 @@ func _h_snapshot() -> void:
 				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
 	_r_door.rpc_id(peer, door_open)
 	for h: House in houses.values():
-		if h.id != 0 and h.state != House.NEIGHBOUR:
+		if h.state != House.NEIGHBOUR:
 			_r_house.rpc_id(peer, h.id, h.state)
 		if h.door_open:
 			_r_house_door.rpc_id(peer, h.id, true)
@@ -424,8 +442,10 @@ func _h_buy(kind: String) -> void:
 	if _sim.money < def["price"]:
 		return
 	_sim.money -= def["price"]
-	var pos := DELIVERY + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.3, 0.3))
-	_spawn(kind, Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos))
+	var slot := _deliveries % 14
+	_deliveries += 1
+	var pos := Vector3(-3.0 + (slot % 7) * 1.0, 0.3 + def["size"].y * 0.5, 2.0 + (slot / 7) * 1.0)
+	_spawn(kind, Transform3D(Basis(), pos))
 	_cast(&"_r_toast", ["%s bought %s (-%s)" % [name_of(Net.sender()), def["label"], UI.money(def["price"])]])
 	_sim_step(0.0)
 
@@ -535,7 +555,7 @@ func _h_demolish(house_id: int) -> void:
 	if not multiplayer.is_server():
 		return
 	var h: House = houses.get(house_id)
-	if h == null or h.state != House.OURS or house_id == 0:
+	if h == null or h.state != House.OURS:
 		return
 	var now := Time.get_ticks_msec()
 	if now - int(_demolish_asked.get(house_id, -100000)) > 6000:
@@ -603,10 +623,15 @@ func _drop_unsupported() -> void:
 		if not it.pinned or not it.is_loose():
 			continue
 		var shape := BoxShape3D.new()
-		shape.size = it.def["size"] * Vector3(0.9, 1.0, 0.9)
+		shape.size = it.def["size"] * 0.9
 		query.shape = shape
-		query.transform = it.global_transform.translated(Vector3.DOWN * 0.06)
+		# held up by what is below it, or for wall-mounted things by the wall behind it
+		var below := it.global_transform.translated(Vector3.DOWN * (it.def["size"].y * 0.05 + 0.06))
+		var behind := it.global_transform.translated(it.global_basis.z * (it.def["size"].z * 0.05 + 0.06))
 		query.exclude = [it.get_rid()]
+		query.transform = below
+		if it.def.get("wall", false) and space.intersect_shape(query, 1).is_empty():
+			query.transform = behind
 		if space.intersect_shape(query, 1).is_empty():
 			_cast(&"_r_release", [it.id, it.global_transform, Vector3.ZERO])
 

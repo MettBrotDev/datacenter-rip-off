@@ -28,6 +28,7 @@ var load := 0.0         # watts currently drawn from it
 
 var _world: Node3D
 var _leds: Array = []
+var _light: OmniLight3D   # lamps only
 var _target_pos := Vector3.ZERO
 var _target_rot := Quaternion.IDENTITY
 var _has_target := false
@@ -55,6 +56,16 @@ func setup(p_id: int, p_kind: String) -> void:
 		add_child(shape)
 	for tagged: Array in Catalog.build_parts(self, def["parts"]):
 		_leds.append(tagged[1])
+	if def.get("light", false):
+		_light = OmniLight3D.new()
+		_light.position.y = def["size"].y * 0.4
+		_light.light_color = Color(1.0, 0.9, 0.75)
+		_light.light_energy = 2.2
+		_light.omni_range = 9.0
+		_light.distance_fade_enabled = true
+		_light.distance_fade_begin = 30.0
+		_light.distance_fade_length = 10.0
+		add_child(_light)
 	set_status(0)
 
 
@@ -88,6 +99,8 @@ func set_status(bits: int) -> void:
 	if bits == status:
 		return
 	status = bits
+	if _light:
+		_light.visible = bits == 3
 	for mat: StandardMaterial3D in _leds:
 		Catalog.set_light(mat, 2 if bits == 3 else (1 if bits & 1 else 0))
 

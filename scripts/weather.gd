@@ -15,6 +15,7 @@ const DRIFT := 1.5       # cloud speed, m/s
 const SPAN := 260.0      # clouds wrap around after this many metres
 
 var current := -1
+var world: Node3D        # asked whether the camera is under a roof
 
 var _env: Environment
 var _sky: ProceduralSkyMaterial
@@ -102,6 +103,5 @@ func _process(dt: float) -> void:
 	# rain falls in a box around whoever is looking, and only where there is no roof
 	var cam := get_viewport().get_camera_3d()
 	if cam:
-		var outdoors := absf(cam.global_position.x) > 5.5 or absf(cam.global_position.z) > 4.5
-		_rain.emitting = current == 2 and outdoors
+		_rain.emitting = current == 2 and world.is_outdoors(cam.global_position)
 		_rain.global_position = cam.global_position + Vector3(0, 9, 0)

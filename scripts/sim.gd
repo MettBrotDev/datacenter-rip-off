@@ -2,9 +2,14 @@ extends RefCounted
 ## Host-only simulation of power, network and money. Runs twice a second.
 ## Rule: nothing is ever forbidden when you build it — this is where the consequences happen.
 ##
-## Power comes from "roots": a building's wall circuit (one breaker each) or any generator.
-## Every device follows its cable chain to exactly one root; each root has its own limit.
-## Root keys: generators use their item id (> 0), circuit c uses -(c + 1).
+## There is no electricity grid. All power comes from generators (catalog `gen`):
+##   - plug a device (or a power strip) straight into a generator, or
+##   - wire a building: a power INLET inside it, cabled to a generator, energises the building's
+##     wiring; every wall SOCKET inside that building then delivers power.
+## A building's wiring has a breaker with a limit. Its load is shared between the generators
+## feeding it, in proportion to their size. Overloaded generators stall, which dumps their share
+## onto the others on the next step.
+## Root keys: a generator is its item id (> 0); building circuit c is -(c + 1).
 
 const Catalog = preload("res://scripts/catalog.gd")
 const OVERLOAD_STEPS := 3   # 1.5 s over the limit before something gives
@@ -12,10 +17,10 @@ const OVERLOAD_STEPS := 3   # 1.5 s over the limit before something gives
 var money := Catalog.START_MONEY
 var tokens := 0.0       # tokens per second being produced
 var watts := 0.0        # total load being served
-var capacity := 0.0     # total power currently available (grid + running generators)
+var capacity := 0.0     # what the running generators could deliver right now
 var profit := 0.0       # $ per second
 var tripped: Dictionary = {}   # circuit id -> true while its breaker is off
-var weather := 0       # index into Catalog.WEATHER
+var weather := 0        # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
 
 var _over: Dictionary = {}   # root key -> consecutive steps above its limit
@@ -38,16 +43,32 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		events.append(Catalog.WEATHER[weather]["news"])
 	var sun: float = Catalog.WEATHER[weather]["solar"]
 
-	# which generators are producing right now
-	var live := {}
+	# generators: which are producing, and how much each can give
+	var limit := {}
 	for it: Node3D in items.values():
-		if it.def.has("gen"):
-			live[it.id] = _generating(it, world)
+		if it.def.has("gen") and _generating(it, world):
+			var gen: Dictionary = it.def["gen"]
+			limit[it.id] = gen["watts"] * (sun if gen["kind"] == "solar" else 1.0)
 
-	# every device's power root: 0 none, GRID, or a generator's item id
+	# buildings: which generators feed each one through its inlets
+	var feeders := {}   # circuit id -> [generator ids]
+	var feeding := {}   # inlet item id -> true
+	for it: Node3D in items.values():
+		if it.def.get("feeds", false) and it.holder == 0:
+			var c: int = world.circuit_at(it.global_position)
+			var g := _source(it, world, limit, false)
+			if c >= 0 and g > 0:
+				feeding[it.id] = true
+				if not feeders.has(c):
+					feeders[c] = []
+				if g not in feeders[c]:
+					feeders[c].append(g)
+
+	# every device's root, and the load on each root
 	var root := {}
 	for it: Node3D in items.values():
-		root[it.id] = _power_root(it, world, live) if it.def.get("power_port", false) else 0
+		var wired: bool = it.def.get("power_port", false) and not it.def.get("feeds", false)
+		root[it.id] = _source(it, world, limit, true) if wired else 0
 	var loads := {}
 	for it: Node3D in items.values():
 		var r: int = root[it.id]
@@ -56,70 +77,89 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if r != 0:
 			loads[r] = loads.get(r, 0.0) + it.def.get("watts", 0.0)
 
-	# limits: breakers trip (one per building we own), generators stall
+	# building wiring: breakers, then hand the building's load to its generators
 	var dead := {}
-	var grid_watts := 0.0
-	capacity = 0.0
 	var circuits: Dictionary = world.circuits()   # circuit id -> [limit in watts, where it is]
 	for c: int in circuits:
 		var key := -(c + 1)
-		var on_circuit: float = loads.get(key, 0.0)
-		if not tripped.has(c) and _overloaded(key, on_circuit, circuits[c][0], dt):
+		var on_wiring: float = loads.get(key, 0.0)
+		if not tripped.has(c) and _overloaded(key, on_wiring, circuits[c][0], dt):
 			tripped[c] = true
-			events.append("Breaker tripped in %s! %d W on a %d W circuit" % [circuits[c][1], on_circuit, circuits[c][0]])
-		if tripped.has(c):
+			events.append("Breaker tripped in %s! %d W on wiring rated for %d W" % [circuits[c][1], on_wiring, circuits[c][0]])
+		var fed_by: Array = feeders.get(c, [])
+		if tripped.has(c) or fed_by.is_empty():
 			dead[key] = true
-		else:
-			capacity += circuits[c][0]
-			grid_watts += on_circuit
+			continue
+		var total := 0.0
+		for g: int in fed_by:
+			total += limit[g]
+		for g: int in fed_by:
+			loads[g] = loads.get(g, 0.0) + on_wiring * limit[g] / total
+
+	# generators: overloaded ones stall, fuel burns
+	capacity = 0.0
 	for it: Node3D in items.values():
 		if not it.def.has("gen"):
 			continue
 		var gen: Dictionary = it.def["gen"]
-		var limit: float = gen["watts"] * (sun if gen["kind"] == "solar" else 1.0)
 		var load: float = loads.get(it.id, 0.0)
 		it.load = load
-		if not live[it.id]:
+		if not limit.has(it.id):
 			_over.erase(it.id)
+			dead[it.id] = true
 			continue
 		if gen["kind"] == "solar":   # a panel just browns out for as long as it is overloaded
-			if load > limit:
+			if load > limit[it.id]:
 				dead[it.id] = true
 			else:
-				capacity += limit
+				capacity += limit[it.id]
 			continue
-		if _overloaded(it.id, load, limit, dt):
+		if _overloaded(it.id, load, limit[it.id], dt):
 			dead[it.id] = true
 			_over.erase(it.id)
 			if gen["kind"] == "fuel":
 				it.running = false
 				events.append("The %s stalled: %d W on a %d W generator" % [it.label.to_lower(), load, gen["watts"]])
-			elif gen["kind"] == "pedal":
+			else:
 				events.append("%s could not keep up with %d W and fell off the bike" % [world.name_of(it.rider), load])
 				it.rider = 0
 			continue
-		capacity += limit
+		capacity += limit[it.id]
 		if gen["kind"] == "fuel":
 			it.fuel = maxf(0.0, it.fuel - dt / gen["burn"] * (0.25 + 0.75 * load / gen["watts"]))
 			if it.fuel <= 0.0:
 				it.running = false
 				dead[it.id] = true
 				events.append("The %s ran out of fuel" % it.label.to_lower())
+	for c: int in feeders:   # a building whose generators all just died is dark too
+		var alive := false
+		for g: int in feeders[c]:
+			alive = alive or not dead.has(g)
+		if not alive:
+			dead[-(c + 1)] = true
 
 	var powered := {}
 	watts = 0.0
 	for id: int in root:
 		powered[id] = root[id] != 0 and not dead.has(root[id])
-	for r: int in loads:
-		if not dead.has(r):
-			watts += loads[r]
+	for it: Node3D in items.values():   # what is actually being served, counted once
+		var r: int = root[it.id]
+		if it.parent != 0 and it.def.get("group", "") == "gpu":
+			r = root.get(it.parent, 0)
+		if r != 0 and not dead.has(r):
+			watts += it.def.get("watts", 0.0)
 
 	var status := {}
 	var running := {}
 	for it: Node3D in items.values():
 		var bits := 0
 		if it.def.has("gen"):
-			bits = 3 if live[it.id] and not dead.has(it.id) else 0
+			bits = 0 if dead.has(it.id) else 3
+		elif it.def.get("feeds", false):
+			bits = 3 if feeding.has(it.id) else 0
+		elif it.def.get("bus", false):
+			var c: int = world.circuit_at(it.global_position)
+			bits = 3 if c >= 0 and circuits.has(c) and not dead.has(-(c + 1)) else 0
 		elif it.def.get("net_port", false):
 			var online: bool = powered[it.id] and _reaches_net(it, world, powered)
 			bits = int(powered[it.id]) | (int(online) << 1)
@@ -137,13 +177,13 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 			tokens += it.def.get("tokens", 0.0)
 			status[it.id] = 3
 
-	profit = tokens * Catalog.TOKEN_PRICE - grid_watts * Catalog.POWER_PRICE   # generator power is paid in fuel
+	profit = tokens * Catalog.TOKEN_PRICE   # power is paid for in fuel, sweat or weather
 	money += profit * dt
 	return status
 
 
-func _overloaded(key: int, load: float, limit: float, dt: float) -> bool:
-	if load <= limit:
+func _overloaded(key: int, load: float, max_load: float, dt: float) -> bool:
+	if load <= max_load:
 		_over.erase(key)
 		return false
 	if dt > 0.0:
@@ -163,22 +203,21 @@ func _generating(it: Node3D, world: Node3D) -> bool:
 	return false
 
 
-## Follows a power cable chain. Returns GRID, a live generator's id, or 0 for no power.
+## Follows a power cable chain from `it`. Returns a live generator's id, or (if `via_sockets`)
+## the key of the building whose wall socket the chain ends in, or 0 for nothing.
 ## A chain that loops back on itself (strip plugged into itself...) never gets anywhere.
-func _power_root(it: Node3D, world: Node3D, live: Dictionary) -> int:
+## Inlets pass via_sockets = false: a building cannot be fed from another building's socket.
+func _source(it: Node3D, world: Node3D, limit: Dictionary, via_sockets: bool) -> int:
 	var cur := it
 	for hop in 16:
-		var to: int = cur.power_to
-		if to == 0:
-			return 0
-		if to < 0:
-			var fixture: Node3D = world.fixtures.get(to)
-			return -(fixture.circuit + 1) if fixture != null and fixture.provides == "power" else 0
-		var next: Node3D = world.items.get(to)
+		var next: Node3D = world.items.get(cur.power_to) if cur.power_to > 0 else null
 		if next == null or next.provides != "power":
 			return 0
 		if next.def.has("gen"):
-			return next.id if live.get(next.id, false) else 0
+			return next.id if limit.has(next.id) else 0
+		if next.def.get("bus", false):
+			var c: int = world.circuit_at(next.global_position)
+			return -(c + 1) if via_sockets and c >= 0 and next.holder == 0 else 0
 		cur = next
 	return 0
 

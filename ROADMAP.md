@@ -4,7 +4,7 @@ Ideas the owner has asked for that are not built yet. Nothing here is designed i
 each needs a short design discussion before building.
 
 ## Power ladder
-Built: exercise bike (250 W) -> lawnmower generator (1.2 kW) -> solar panel (400 W, weather dependent)
+Built: exercise bike (300 W) -> lawnmower generator (1.2 kW) -> solar panel (400 W, weather dependent)
 -> diesel generator (5 kW).
 
 Wanted next, in this order. These are big structures, not carryable items, so they need a way to be
@@ -34,6 +34,18 @@ network loops, generator fumes and noise.
 Products and AI models, marketing, progression, staff or automation.
 
 ## Town and neighbours
-Built: 37 buyable houses, haggling, demolition into a building pad.
-Ideas: neighbours with routines and opinions (complaints about generator noise, power cuts, smoke),
-selling furniture, merging adjacent pads, vehicles for the bigger map, a hardware store you walk to.
+Built: 38 buyable houses (including the landlady's, next to the garage), haggling, demolition into a building pad.
+
+Asked for by the owner, not built yet:
+- **House demolition as an event**: a funny animation, something exciting to watch, instead of the
+  house just vanishing.
+- **Neighbour complaints**: about generator noise, smoke, power cuts, cables across their lawn...
+- **Demonstrations**: neighbours protesting outside the datacenter when things get bad enough.
+
+Other ideas: neighbours with routines, selling furniture, merging adjacent pads, vehicles for the
+bigger map, a hardware store you walk to.
+
+## Lighting
+Built: one dim always-on bulb per room; floor lamps you buy and have to power.
+Open (owner undecided): whether room lights should need power at all. Going dark when the power
+fails is funny, but being unable to see is annoying.

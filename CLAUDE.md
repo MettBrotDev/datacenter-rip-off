@@ -27,19 +27,25 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - `scripts/settings.gd` (autoload `Settings`, saved to user://options.cfg), `settings_menu.gd`
 
 ## Core rules of the simulation
-- Power and network are chains of cables: item -> provider -> ... -> wall fixture. Loops are allowed and simply dead.
+- THERE IS NO ELECTRICITY GRID. All power comes from generators (`gen` in the catalog: pedal / fuel / solar).
+  Plug devices or strips straight into a generator, or wire a building: a power INLET item inside it,
+  cabled to a generator, energises the building; every wall SOCKET item inside then delivers power.
+  A building's load is shared between the generators feeding it, in proportion to their size.
+- Each owned building has a breaker with a wiring limit (garage 3600 W, houses 3600-7500 W by size).
+- Power and network are chains of cables: item -> provider -> ... Loops are allowed and simply dead.
 - Nothing is validated at build time except socket counts and cable length (7 m, then it gets yanked out).
-- Garage circuit: 3600 W. Over that for 1.5 s trips the breaker; a player resets it at the box.
+- Overloading a generator stalls it (or throws the rider off the bike); its share then lands on the others.
+- Internet comes from the garage's wall box and from the router in every house we own.
 - Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
-- Power roots: the wall circuit, or any generator item (`gen` in the catalog: pedal / fuel / solar).
-  Each root has its own limit; overloading a generator stalls it (or throws the rider off the bike).
+- Lighting: every room has one dim bulb that needs no power; floor lamps are bought and powered.
 - Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
 - The town: `scripts/town.gd` is the layout (streets, 37 lots, park, bounds) shared by scenery and gameplay.
   `scripts/outside.gd` is pure scenery built on it (one subagent-written file, heavily MultiMesh-batched).
   `scripts/shapes.gd` makes the soft-edged meshes everything uses.
 - Houses (`scripts/house.gd`): one per lot plus our own (id 0). States NEIGHBOUR / OURS / GONE (demolished).
   Bought by haggling with the neighbour (`offer.gd`, host logic in `world._h_offer`). Each has its own
-  breaker circuit (circuit id = house id, garage = 1000), outlets, router, furniture items.
+  breaker circuit (circuit id = house id, garage = 1000), a router and furniture items. We start with
+  the garage only; house 0 next door belongs to "your landlady".
 - Weather (`Catalog.WEATHER`, decided in `sim.gd`, drawn by `weather.gd`) scales solar output.
 - Planned features and open design questions live in `ROADMAP.md`; known problems in `KNOWN_ISSUES.md`.
 - Collision layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
@@ -49,8 +55,9 @@ The owner works on this PC while tests run: use `--headless` for everything exce
 Any test flag puts the game in test mode (mouse is never captured or read).
 Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--pos=X,Y,Z`, `--open`,
 `--money=N`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
-- Everything at once: `godot_console --headless --path . -- --host --selftest --money=5000 --probe=12`
-  (wires a server, places it on the shelf via a real key press, runs generators, buys a plot, overloads the bike).
+- Everything at once: `godot_console --headless --path . -- --host --selftest --money=90000 --weather=0 --probe=18`
+  prints one CHECK line per stage (pedal power, shelf placement by key press, wiring the garage via inlet
+  and sockets, a lamp, buying and demolishing houses, solar, a wall-mounted socket). Read the CHECK lines.
 - Sync: headless host with `--probe` in the background, then a headless `--join --probe=N`; the two dumps must match.
 - Visuals (rare): `godot_console --position 6000,6000 --path . -- --host --open --pos=.. --yaw=.. --shot=file.png`,
   then look at the image. This opens a real (off-screen) window.

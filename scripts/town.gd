@@ -14,8 +14,8 @@ const CLEAR_SIZE := Vector2(20, 24)              # centred on the house: nothing
 const SETBACK := 22.0                            # street centre to house centre
 const LOT_PITCH := 28.0
 
-# Our own house, next to the garage. Same building as the neighbours', but already ours.
-const HOME_HOUSE := {"id": 0, "pos": Vector3(-14, 0, 1.5), "yaw": 0.0, "size": 1, "name": "Home", "value": 0}
+# The house next to the garage. We only rent the garage; the house has to be bought like any other.
+const HOME_HOUSE := {"id": 0, "pos": Vector3(-14, 0, 1.5), "yaw": 0.0, "size": 1, "name": "your landlady", "value": 15000}
 
 # House footprints (x along the street, z deep) and what the wiring can take, per size class.
 const FOOTPRINTS: Array[Vector2] = [Vector2(9, 8), Vector2(11, 9), Vector2(14, 10)]

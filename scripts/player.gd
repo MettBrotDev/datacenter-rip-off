@@ -262,6 +262,14 @@ func _update_actions() -> void:
 						_set_cable.bind({"id": t.id, "type": type})])
 		if t.def.has("gen"):
 			_generator_actions(t, acts)
+		if t.def.get("feeds", false) or t.def.get("bus", false):
+			var where: Array = _world.circuits().get(_world.circuit_at(t.global_position), [])
+			if where.is_empty():
+				acts.append(["", "Not inside a building of yours: it does nothing here", Callable()])
+			elif t.def.get("feeds", false):
+				acts.append(["", "Feeds %s" % where[1] if t.status == 3 else "Cable it to a running generator to power %s" % where[1], Callable()])
+			else:
+				acts.append(["", "Live" if t.status == 3 else "Dead: %s has no power coming in" % where[1], Callable()])
 		if t.provides != "":
 			acts.append(["", "%d/%d sockets used" % [_world.sockets_used(t.id, t.provides), t.sockets], Callable()])
 	elif t:
@@ -278,10 +286,7 @@ func _update_actions() -> void:
 					acts.append(["interact", "[E] %s the door" % ("Close" if home.door_open else "Open"),
 							_world.request_house_door.bind(t.house)])
 			"deed":
-				if t.house == 0:
-					acts.append(["", "The deed to your house. Framed, because you are proud of it.", Callable()])
-				else:
-					acts.append(["interact", "[E] Demolish this house (press twice)", _world.request_demolish.bind(t.house)])
+				acts.append(["interact", "[E] Demolish this house (press twice)", _world.request_demolish.bind(t.house)])
 			"door":
 				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
 						_world.request_door])
@@ -290,7 +295,7 @@ func _update_actions() -> void:
 				if _world.tripped_circuits.has(t.circuit):
 					acts.append(["interact", "[E] Reset the breaker", _world.request_breaker.bind(t.circuit)])
 				else:
-					acts.append(["", "Breaker box: this building can take %d W" % limit, Callable()])
+					acts.append(["", "Breaker box: this building's wiring carries up to %d W.\nIt has no power of its own: cable a power inlet to a generator." % limit, Callable()])
 			_:
 				acts.append(["", "%s: %d/%d sockets used" % [t.label, _world.sockets_used(t.id, t.provides), t.sockets], Callable()])
 	_acts = acts
@@ -307,9 +312,17 @@ func _update_actions() -> void:
 ## Where the held item would sit if placed now: flat on the surface under the crosshair,
 ## front towards the player. Null when not looking at a surface you can put things on.
 func _placement(held: Node3D) -> Variant:
-	if not _ray.is_colliding() or _ray.get_collision_normal().y < 0.7:
+	if not _ray.is_colliding():
 		return null
 	var size: Vector3 = held.def["size"]
+	var normal := _ray.get_collision_normal()
+	if absf(normal.y) < 0.3 and held.def.get("wall", false):   # mount it flat on the wall, facing out
+		normal.y = 0.0
+		normal = normal.normalized()
+		var turned := Basis.looking_at(normal).rotated(normal, _place_turns * PI * 0.5)
+		return Transform3D(turned, _ray.get_collision_point() + normal * (size.z * 0.5 + 0.005))
+	if normal.y < 0.7:
+		return null
 	var basis := Basis(Vector3.UP, rotation.y + PI + _place_turns * PI * 0.5)
 	var point := _ray.get_collision_point() + Vector3.UP * (size.y * 0.5 + 0.01)
 	# If it would stick into a wall or another object, slide it back towards us until it fits.

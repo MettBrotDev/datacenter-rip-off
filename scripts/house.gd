@@ -1,9 +1,10 @@
 extends Node3D
-## A house on a town lot: walls with real door and window openings, two rooms, a roof, its own
-## wiring (outlets, breaker, internet) and a neighbour standing outside who might sell it.
+## A house on a town lot: walls with real door and window openings, two rooms, a roof, a breaker
+## box and an internet line, and a neighbour standing outside who might sell it.
+## There is no power in it: the owners bring their own (inlets, sockets, generators).
 ## Local frame: centred on the footprint, front door facing +Z. Three states:
-##   NEIGHBOUR  locked, wiring dead      OURS  door works, wiring live
-##   GONE       demolished: a flat building pad, the wiring moved onto a utility board
+##   NEIGHBOUR  locked      OURS  door works, internet live, wiring usable
+##   GONE       demolished: a flat building pad, breaker and internet on a utility board
 
 const Town = preload("res://scripts/town.gd")
 const Shapes = preload("res://scripts/shapes.gd")
@@ -47,8 +48,6 @@ func setup(p_lot: Dictionary) -> void:
 	_d = footprint.y
 	_px = _w * 0.18
 	_door_x = -_w * 0.5 + _w * 0.3
-	if id == 0:
-		state = OURS
 	_build_shell()
 	_build_fixtures()
 
@@ -77,13 +76,9 @@ func set_state(new_state: int) -> void:
 	if new_state == state:
 		return
 	state = new_state
-	var live := state != NEIGHBOUR
-	for f: Fixture in fixtures.values():
-		if f.kind == "outlet":
-			f.provides = "power" if live else ""
-		elif f.kind == "router":
-			f.provides = "net" if live else ""
-			f.set_lamp(2 if live else 0)
+	var router: Fixture = fixtures[_fid(3)]   # the internet line comes with the house; power does not
+	router.provides = "net"
+	router.set_lamp(2)
 	if _npc_blob:   # the neighbour moves out
 		var npc: Fixture = fixtures[_fid(1)]
 		fixtures.erase(npc.id)
@@ -139,13 +134,14 @@ func _build_shell() -> void:
 	_shell.add_child(roof)
 	_shell.add_child(Shapes.instance(Shapes.rounded_box(Vector3(0.6, rise + 0.5, 0.6), 0.05), _mats["wall"],
 			Vector3(hw * 0.5, HEIGHT + rise * 0.5 + 0.3, -hd * 0.3)))
-	# a ceiling lamp per room; without them interiors only get cold light from the sky
+	# one dim bulb per room that is always on, so you are never in the dark; anything brighter
+	# is a lamp you buy and have to power
 	for x: float in [(-hw + _px) * 0.5, (_px + hw) * 0.5]:
 		var lamp := OmniLight3D.new()
 		lamp.position = Vector3(x, HEIGHT - 0.35, 0)
-		lamp.light_color = Color(1.0, 0.88, 0.7)
-		lamp.light_energy = 1.6
-		lamp.omni_range = 8.0
+		lamp.light_color = Color(1.0, 0.85, 0.65)
+		lamp.light_energy = 0.45
+		lamp.omni_range = 7.0
 		lamp.distance_fade_enabled = true   # only costs anything when someone is near
 		lamp.distance_fade_begin = 30.0
 		lamp.distance_fade_length = 10.0
@@ -156,7 +152,7 @@ func _build_shell() -> void:
 		var glow := _mat(Color(1.0, 0.92, 0.75), 0.4)
 		glow.emission_enabled = true
 		glow.emission = glow.albedo_color
-		glow.emission_energy_multiplier = 2.5
+		glow.emission_energy_multiplier = 1.0
 		_shell.add_child(Shapes.instance(bulb, glow, Vector3(x, HEIGHT - 0.12, 0)))
 	# doorstep
 	_shell.add_child(Shapes.instance(Shapes.rounded_box(Vector3(1.8, 0.1, 0.9), 0.04), _mats["trim"],
@@ -172,16 +168,10 @@ func _build_fixtures() -> void:
 	_fixture(2, "breaker", Vector3(_door_x + 1.3, 1.45, hd - inside), 180.0)
 	_fixture(7, "deed", Vector3(_door_x + 1.95, 1.5, hd - inside), 180.0)
 	var router := _fixture(3, "router", Vector3(-hw + 0.75, 1.5, -hd + inside), 0.0)
-	_fixture(4, "outlet", Vector3(-hw + _w * 0.25, 0.4, -hd + inside), 0.0)
-	_fixture(5, "outlet", Vector3(-hw + inside, 0.4, hd * 0.55), 90.0)
-	_fixture(6, "outlet", Vector3(_px + 1.2, 0.4, -hd + inside), 0.0)
+	router.provides = ""   # dead until the house is ours
+	router.set_lamp(0)
 	for f: Fixture in fixtures.values():
 		f.circuit = id
-		if state == NEIGHBOUR and f.kind in ["outlet", "router"]:
-			f.provides = ""
-	router.set_lamp(0 if state == NEIGHBOUR else 2)
-	if state != NEIGHBOUR:
-		return
 	# the neighbour, standing by their front door
 	var npc := _fixture(1, "neighbour", Vector3(_door_x + 1.7, 0, hd + 1.6), 0.0)
 	npc.label = lot["name"]
@@ -239,8 +229,7 @@ func _demolish() -> void:
 	for x: float in [-1.2, 1.2]:
 		add_child(Shapes.instance(Shapes.rounded_box(Vector3(0.12, 1.9, 0.12), 0.03), wood, board + Vector3(x, 0.95, -0.02)))
 	_collider(body, Vector3(2.6, 1.9, 0.12), board + Vector3(0, 0.95, 0))
-	var spots := {2: Vector3(-0.9, 1.4, 0.04), 3: Vector3(-0.2, 1.5, 0.04), 4: Vector3(0.45, 1.3, 0.04),
-		5: Vector3(0.75, 1.3, 0.04), 6: Vector3(1.05, 1.3, 0.04)}
+	var spots := {2: Vector3(-0.7, 1.4, 0.04), 3: Vector3(0.4, 1.5, 0.04)}   # breaker, internet
 	for slot: int in spots:
 		var f: Fixture = fixtures[_fid(slot)]
 		f.position = board + spots[slot]

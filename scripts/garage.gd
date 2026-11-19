@@ -84,8 +84,6 @@ func _ready() -> void:
 			_box(Vector3(0.04, 1.9, 0.04), Vector3(x, 0.95, z), metal, false)
 
 	# things players interact with (ids are fixed: host and clients must agree)
-	_fixture(-1, "outlet", Vector3(-W / 2, 0.4, 1.6), 90)
-	_fixture(-2, "outlet", Vector3(W / 2, 0.4, 0.6), -90)
 	_fixture(-3, "router", Vector3(1.6, 1.5, -D / 2), 0)
 	_fixture(-4, "breaker", Vector3(-2.4, 1.45, -D / 2), 0)
 	_fixture(-5, "shop", Vector3(-W / 2 + 0.38, 0.93, -1.0), 90)
@@ -170,7 +168,7 @@ func _lamp(top: Vector3, shadows: bool) -> void:
 	var light := OmniLight3D.new()
 	light.position = top - Vector3(0, 0.85, 0)
 	light.light_color = Color(1.0, 0.86, 0.68)
-	light.light_energy = 1.7
+	light.light_energy = 0.7   # dim emergency lighting; buy lamps for more
 	light.omni_range = 9.0
 	light.shadow_enabled = shadows
 	add_child(light)

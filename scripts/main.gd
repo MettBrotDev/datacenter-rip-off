@@ -99,75 +99,109 @@ func _handle_args() -> void:
 		get_tree().quit()
 
 
-## GPU onto server, strip into the wall, server into the strip and the router,
-## then buy a rack and mount the server in it.
+## Plays through a whole session using the real request path, printing a CHECK line per stage.
 func _selftest() -> void:
-	await get_tree().create_timer(1.5).timeout
-	var by_kind := {}
-	for it: Node3D in world.items.values():
-		by_kind[it.kind] = it
-	var server: Node3D = by_kind["server"]
-	world.request_grab(by_kind["gpu_1080"].id)
-	world.request_attach(server.id)
-	world.request_link(by_kind["powerstrip"].id, "power", -1)
-	world.request_link(server.id, "power", by_kind["powerstrip"].id)
-	world.request_link(server.id, "net", -3)
-	world.request_buy("rack")
-	await get_tree().create_timer(1.0).timeout
-	for it: Node3D in world.items.values():
-		if it.kind == "rack":
-			world.request_grab(server.id)
-			world.request_attach(it.id)
-	# placement through the real key path: carry the server, look at the front edge of the
-	# middle shelf board and press E
-	await get_tree().create_timer(0.5).timeout
+	await _wait(1.5)
 	var me: Node3D = world.player(1)
+	var kit := _by_kind()
+	var server: Node3D = kit["server"]
+	var strip: Node3D = kit["powerstrip"]
+	var bike: Node3D = kit["gen_bike"]
+
+	# 1. leg power: GPU on the server, server -> strip -> bike, internet from the wall box
+	world.request_grab(kit["gpu_1080"].id)
+	world.request_attach(server.id)
+	world.request_link(strip.id, "power", bike.id)
+	world.request_link(server.id, "power", strip.id)
+	world.request_link(server.id, "net", -3)
+	_check("wired to the bike, nobody pedalling")
+	me.position = bike.global_position + Vector3(0, 0, 1)
+	world.request_use(bike.id)
+	await _wait(0.6)
+	_check("pedalling")
+	world.request_use(bike.id)
+
+	# 2. rack, then placement through the real key path: carry the server, look at the front
+	#    edge of the middle shelf board and press E
+	world.request_buy("rack")
+	await _wait(1.0)
+	world.request_grab(server.id)
+	world.request_attach(_by_kind()["rack"].id)
+	await _wait(0.2)
+	me.position = server.global_position + Vector3(0, 0, -1.5)
+	world.request_grab(server.id)   # pull it back out of the rack
 	me.position = Vector3(2.5, 0, -1.0)
 	me.rotation.y = -PI / 2
 	me.head.rotation.x = -0.24
-	world.request_grab(server.id)
-	await get_tree().create_timer(0.6).timeout
+	await _wait(0.6)
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_E
 	key.pressed = true
 	Input.parse_input_event(key)
+	await _wait(0.3)
+	print("CHECK server on the shelf: at %.1v pinned=%s" % [server.global_position, server.pinned])
 
-	# generators and land: mower generator takes over the power strip, someone pedals the bike,
-	# and the backyard gets bought (needs --money)
-	await get_tree().create_timer(0.5).timeout
-	for kind: String in ["gen_mower", "gen_bike", "fuel"]:
+	# 3. wire the garage: a mower generator feeding a power inlet, wall sockets delivering it
+	for kind: String in ["gen_mower", "fuel", "inlet", "outlet", "lamp"]:
 		world.request_buy(kind)
-	await get_tree().create_timer(0.3).timeout
-	for it: Node3D in world.items.values():
-		by_kind[it.kind] = it
-	var strip: Node3D = by_kind["powerstrip"]
-	me.position = by_kind["gen_mower"].global_position + Vector3(0, 0, 1)
-	world.request_use(by_kind["gen_mower"].id)
+	await _wait(0.4)
+	kit = _by_kind()
+	me.position = Vector3(0, 0, 1.0)
+	world.request_grab(kit["inlet"].id)
+	world.request_place(Transform3D(Basis(), Vector3(3.6, 0.13, 3.2)))
+	world.request_grab(kit["outlet"].id)
+	world.request_place(Transform3D(Basis(), Vector3(1.0, 0.07, 2.4)))
+	world.request_link(kit["inlet"].id, "power", kit["gen_mower"].id)
 	world.request_link(strip.id, "power", 0)
-	world.request_link(strip.id, "power", by_kind["gen_mower"].id)
-	world.request_grab(by_kind["fuel"].id)
-	world.request_refuel(by_kind["gen_mower"].id)
-	world.request_use(by_kind["gen_bike"].id)
-	# real estate: insult neighbour 17 (next door, east), then pay well over the odds
+	world.request_link(strip.id, "power", kit["outlet"].id)
+	_check("garage wired, mower off")
+	world.request_use(kit["gen_mower"].id)
+	world.request_grab(kit["fuel"].id)
+	world.request_refuel(kit["gen_mower"].id)
+	world.request_link(kit["lamp"].id, "power", kit["outlet"].id)
+	await _wait(0.6)
+	_check("mower running, lamp plugged in")
+
+	# 4. real estate: insult neighbour 17 (next door, east), then pay well over the odds;
+	#    buy number 16 and knock it down
 	world.request_offer(17, 1000)
 	world.request_offer(17, 40000)
 	world.request_house_door(17)
-	# overload: the 250 W bike cannot carry a 260 W server, so the rider gets thrown off
-	await get_tree().create_timer(1.0).timeout
-	world.request_link(strip.id, "power", 0)
-	world.request_link(strip.id, "power", by_kind["gen_bike"].id)
-	# solar: carry a panel out onto the lawn; what it adds depends on the weather
-	world.request_buy("gen_solar")
-	await get_tree().create_timer(0.3).timeout
-	for it: Node3D in world.items.values():
-		if it.kind == "gen_solar":
-			world.request_use(by_kind["gen_bike"].id)   # hop off if still on
-			me.position = Vector3(6, 0, 3)
-			world.request_grab(it.id)
-			world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 2)))
-	# plug the server into the new house's wiring, then knock house 16 down after buying it
-	await get_tree().create_timer(0.5).timeout
-	world.request_link(server.id, "power", 0)
 	world.request_offer(16, 30000)
 	world.request_demolish(16)
 	world.request_demolish(16)
+
+	# 5. solar: carry a panel out onto the lawn; what it adds depends on the weather
+	world.request_buy("gen_solar")
+	await _wait(0.4)
+	me.position = Vector3(6, 0, 3)
+	world.request_grab(_by_kind()["gen_solar"].id)
+	world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 2)))
+	await _wait(0.6)
+	_check("solar panel on the lawn")
+
+	# 6. a second socket mounted on the garage's left wall, 1 m up: it must stay there
+	world.request_buy("outlet")
+	await _wait(0.4)
+	me.position = Vector3(-2, 0, 1)
+	var socket: Node3D = _by_kind()["outlet"]
+	world.request_grab(socket.id)
+	world.request_place(Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-4.47, 1.0, 1.0)))
+	await _wait(1.3)
+	print("CHECK socket on the wall: at %.2v pinned=%s live=%s" % [socket.global_position, socket.pinned, socket.status == 3])
+
+
+func _wait(seconds: float) -> void:
+	await get_tree().create_timer(seconds).timeout
+
+
+func _by_kind() -> Dictionary:
+	var out := {}
+	for it: Node3D in world.items.values():
+		out[it.kind] = it
+	return out
+
+
+func _check(stage: String) -> void:
+	world._sim_step(0.0)
+	print("CHECK %s: tokens=%.1f power=%.0f/%.0f W" % [stage, world.tokens, world.watts, world.capacity])
