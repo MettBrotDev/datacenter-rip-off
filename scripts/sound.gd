@@ -82,6 +82,8 @@ func _ready() -> void:
 	if _settings:
 		_settings.changed.connect(_apply_volumes)
 	_apply_volumes()
+	if _settings and _settings._is_test_run():   # automated runs happen while somebody works at this PC: never audible
+		AudioServer.set_bus_mute(0, true)
 	get_tree().node_added.connect(_on_node_added)
 	_thread = Thread.new()
 	_thread.start(_build_all)

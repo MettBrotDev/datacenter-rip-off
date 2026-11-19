@@ -132,6 +132,11 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   the garage only; house 0 next door belongs to "your landlady".
 - Weather (`Catalog.WEATHER`, decided in `sim.gd`, drawn by `weather.gd`) scales solar output.
 - Planned features and open design questions live in `ROADMAP.md`; known problems in `KNOWN_ISSUES.md`.
+- Sound is synthesised in code at startup (`synth.gd` DSP, `sound_bank.gd` recipes, autoload `Sound` in
+  `sound.gd`): no audio files. Hooks are one-line `Sound.*` calls in the `_r_*` handlers and a few other places;
+  toast sounds are picked by matching the toast TEXT (`Sound.toast`), so rewording a toast can lose its sound.
+  Headless runs build nothing; test runs (any `--probe`/`--shot`/`--selftest`) mute the master bus.
+  `--soundcheck[=DIR]` prints measurements for every sound and writes WAVs.
 - Collision layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
 
 ## Testing (always do this after changes)
