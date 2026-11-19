@@ -41,7 +41,7 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
   two ends stay loose. `world.route_problem()` is the one rule for both; `--cables` shows both in the garage.
 - Overloading a generator stalls it (or throws the rider off the bike); its share then lands on the others.
 - Internet comes from the garage's wall box and from the router in every house we own.
-- Machines (`psu` in the catalog: office PC, tower server, workstation, GPU server, AI pod) are
+- Machines (`psu` in the catalog: office PC, tower server, workstation, GPU server, AI pod, plus mini PC, mining frame (no lid), 2U server, liquid-ready workstation) are
   empty chassis with slots for CPUs, RAM sticks and GPUs (`slots` = [{accepts, xf}]). The lid is
   screwed on (`Item.opened`, needs the screwdriver tool); parts go in and out only while it is off,
   and snap to the nearest free slot under the crosshair (`player._mount_spot`, `world.free_slot`).

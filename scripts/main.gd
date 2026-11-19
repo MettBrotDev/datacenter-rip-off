@@ -14,7 +14,7 @@ extends Node
 ##   --demo[=starved]       host: give the company a few hours of history (products, a model, users, 300 tok/s);
 ##                          "starved" adds a product the servers cannot keep up with
 ##   --company[=TAB]        open the company menu (overview, slop, products, lab, platform, market)
-##   --shop                 open the parts market
+##   --shop[=CATEGORY/SUB]  open the parts market, e.g. --shop=compute/gpu
 ##   --used                 open the parts market on its second-hand side
 ##   --bench                host: put two opened, fully fitted machines on the driveway
 ##   --cables               host: cable up the garage, three machines loosely and one neatly pinned
@@ -126,6 +126,8 @@ func _handle_args() -> void:
 		world.player(multiplayer.get_unique_id()).head.rotation.x = deg_to_rad(float(args["pitch"]))
 	if args.has("shop") and world:
 		world.hud.open_shop()
+		if args["shop"] != "":
+			world.hud._shop.open_to(args["shop"])
 	if args.has("used") and world:
 		world.hud.open_used_market()
 	if args.has("open") and world:
@@ -289,14 +291,14 @@ func _selftest() -> void:
 	var sim: RefCounted = world._sim
 	var garage: int = world.GARAGE_CIRCUIT
 	await _run(60.0)
-	_check("garage %d °C, outside %d °C, chips %d °C" % [sim.temps[garage], sim.outside_temp(), server.heat])
+	_check("garage %d Â°C, outside %d Â°C, chips %d Â°C" % [sim.temps[garage], sim.outside_temp(), server.heat])
 	server.heat = 92.0
-	_check("chips forced to 92 °C: half speed")
+	_check("chips forced to 92 Â°C: half speed")
 	server.heat = 104.0
-	_check("chips forced to 104 °C: shut down")
+	_check("chips forced to 104 Â°C: shut down")
 	server.heat = 60.0
 	world._sim_step(0.5)
-	_check("chips back at 60 °C")
+	_check("chips back at 60 Â°C")
 
 	# 9. fire: set the server alight, put it out with an extinguisher
 	await _buy(["extinguisher"])
@@ -372,7 +374,7 @@ func _selftest() -> void:
 	world.request_link(big.id, "power", strip.id)
 	world.request_link(big.id, "net", -3)
 	await _run(40.0)
-	_check("A100 with no coolant: chips %d °C" % big.heat)
+	_check("A100 with no coolant: chips %d Â°C" % big.heat)
 
 	#     Build the loop: reservoir <- pump <- manifold <- server, radiator outside, three buckets of water.
 	world.request_link(pump.id, "power", _by_kind()["outlet"].id)
@@ -388,7 +390,7 @@ func _selftest() -> void:
 	world.request_release(false)
 	world.request_use(pump.id)
 	await _run(120.0)
-	_check("loop running: chips %d °C, coolant %d °C, reservoir %d%%, server hose %d%% full" % [
+	_check("loop running: chips %d Â°C, coolant %d Â°C, reservoir %d%%, server hose %d%% full" % [
 		big.heat, pump.heat, tank.fuel * 100.0, big.hose * 100.0])
 
 	#     Pull the server's hose off with the pump running: spray. Then the safe way: pump off, drain, unplug.
@@ -409,22 +411,22 @@ func _selftest() -> void:
 	world._sim_step(0.5)
 	print("CHECK reservoir on the tap: %d%% full" % (tank.fuel * 100.0))
 
-	# 14. people: ten minutes' worth of a 60 °C garage, without and with the heat suit
+	# 14. people: ten minutes' worth of a 60 Â°C garage, without and with the heat suit
 	await _buy(["suit"])
 	sim.temps[garage] = 60.0
 	world.temps[garage] = 60.0
 	me.position = Vector3(0, 0, 0)
 	me.exposure = 0.0
 	me._feel_heat(30.0)
-	print("CHECK 30 s at 60 °C without a suit: exposure %d%%" % (me.exposure * 100.0))
+	print("CHECK 30 s at 60 Â°C without a suit: exposure %d%%" % (me.exposure * 100.0))
 	me._feel_heat(35.0)
-	print("CHECK 65 s at 60 °C: now at %.1v (fainted and moved outside if z is 6.5)" % me.position)
+	print("CHECK 65 s at 60 Â°C: now at %.1v (fainted and moved outside if z is 6.5)" % me.position)
 	me.position = _by_kind()["suit"].global_position + Vector3(0, 0, 1)
 	world.request_use(_by_kind()["suit"].id)
 	me.position = Vector3(0, 0, 0)
 	me.exposure = 0.0
 	me._feel_heat(600.0)
-	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
+	print("CHECK 10 min at 60 Â°C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
 
 	# 15a. the company: tokens per second are a live stream. Use it, serve with it, rent it out, or waste it.
 	var company: RefCounted = world._company

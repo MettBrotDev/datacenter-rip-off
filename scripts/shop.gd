@@ -18,10 +18,14 @@ var _category := "all"
 var _selected := ""
 var _count := 1
 var _balance: Label
-var _grid: GridContainer
+var _shelves: VBoxContainer       # one block (heading + grid of cards) per category / sub-category
+var _blocks: Array = []           # {"cat", "sub", "box", "head", "kinds"}
+var _subbar: HFlowContainer       # the sub-category pills under the heading
+var _sub: Dictionary = {}         # category key -> the sub-category chosen there ("all" = everything)
+var _cat_buttons: Dictionary = {}
 var _heading: Label
 var _cards: Dictionary = {}       # kind -> {"panel": PanelContainer, "price": Label}
-var _order: Array = []            # every part, shelf by shelf, cheapest first
+var _order: Array = []            # every part, shelf by shelf, sub-category by sub-category, by tier then price
 var _detail: VBoxContainer        # rebuilt whenever another part is selected
 var _count_label: Label
 var _total: Label
@@ -121,6 +125,7 @@ func _ready() -> void:
 		b.custom_minimum_size.y = 46
 		b.button_pressed = cat["key"] == _category
 		b.pressed.connect(_show_category.bind(cat["key"], cat["name"]))
+		_cat_buttons[cat["key"]] = b
 		side.add_child(b)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = SIZE_EXPAND_FILL
@@ -135,21 +140,41 @@ func _ready() -> void:
 	body.add_child(middle)
 	_heading = UI.bold("Everything", 20)
 	middle.add_child(_heading)
+	_subbar = HFlowContainer.new()
+	_subbar.add_theme_constant_override("h_separation", 6)
+	_subbar.add_theme_constant_override("v_separation", 6)
+	_subbar.visible = false
+	middle.add_child(_subbar)
 	var scroll := UI.scroll()
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	middle.add_child(scroll)
-	_grid = GridContainer.new()
-	_grid.columns = 3
-	_grid.size_flags_horizontal = SIZE_EXPAND_FILL
-	_grid.add_theme_constant_override("h_separation", 10)
-	_grid.add_theme_constant_override("v_separation", 10)
-	scroll.add_child(_grid)
-	for cat: Dictionary in Catalog.CATEGORIES:   # shelf by shelf, cheapest first
-		var shelf: Array = Catalog.SHOP.filter(func(kind: String) -> bool: return Catalog.SHOP_INFO[kind][0] == cat["key"])
-		shelf.sort_custom(func(a: String, b: String) -> bool: return Catalog.ITEMS[a]["price"] < Catalog.ITEMS[b]["price"])
-		_order.append_array(shelf)
-	for kind: String in _order:
-		_grid.add_child(_part_card(kind))
+	_shelves = VBoxContainer.new()
+	_shelves.size_flags_horizontal = SIZE_EXPAND_FILL
+	_shelves.add_theme_constant_override("separation", 12)
+	scroll.add_child(_shelves)
+	for cat: Dictionary in Catalog.CATEGORIES:   # shelf by shelf, then sub-category by sub-category
+		var subs: Array = cat.get("subs", [{"key": "", "name": ""}])
+		for sub: Dictionary in subs:
+			var kinds: Array = Catalog.SHOP.filter(func(kind: String) -> bool: return _belongs(kind, cat["key"], sub["key"]))
+			if kinds.is_empty():
+				continue
+			kinds.sort_custom(_cheaper_first)
+			var box := VBoxContainer.new()
+			box.add_theme_constant_override("separation", 6)
+			_shelves.add_child(box)
+			var sub_head := UI.caption("", COLORS[cat["color"]])
+			sub_head.text = "%s   %s" % [UI.ic(cat["icon"]), sub["name"].to_upper()]
+			box.add_child(sub_head)
+			var grid := GridContainer.new()
+			grid.columns = 3
+			grid.size_flags_horizontal = SIZE_EXPAND_FILL
+			grid.add_theme_constant_override("h_separation", 10)
+			grid.add_theme_constant_override("v_separation", 10)
+			box.add_child(grid)
+			for kind: String in kinds:
+				grid.add_child(_part_card(kind))
+			_order.append_array(kinds)
+			_blocks.append({"cat": cat["key"], "sub": sub["key"], "box": box, "head": sub_head, "kinds": kinds})
 
 	# right: the selected part
 	var detail_panel := UI.inset(18, 12)
@@ -200,15 +225,94 @@ func _part_card(kind: String) -> PanelContainer:
 	return panel
 
 
+## Does this part sit in this category and sub-category ("" = any / the category has none)?
+func _belongs(kind: String, cat: String, sub: String) -> bool:
+	var info: Array = Catalog.SHOP_INFO[kind]
+	return info[0] == cat and (sub == "" or (info.size() > 2 and info[2] == sub))
+
+
+## Tier first (machines count by the tier they take), then price.
+func _cheaper_first(a: String, b: String) -> bool:
+	var da: Dictionary = Catalog.ITEMS[a]
+	var db: Dictionary = Catalog.ITEMS[b]
+	var ta: int = da.get("tier", da.get("max_tier", 0))
+	var tb: int = db.get("tier", db.get("max_tier", 0))
+	if ta != tb:
+		return ta < tb
+	return da["price"] < db["price"]
+
+
+## Opens the market on a category and sub-category, e.g. "compute/gpu" (for tests and shortcuts).
+func open_to(path: String) -> void:
+	var bits := path.split("/")
+	set_mode("new")
+	var key: String = bits[0] if bits[0] != "" else "all"
+	if bits.size() > 1:
+		_sub[key] = bits[1]
+	if _cat_buttons.has(key):
+		_cat_buttons[key].button_pressed = true
+		_show_category(key, "Everything" if key == "all" else _cat_named(key)["name"])
+
+
+func _cat_named(key: String) -> Dictionary:
+	for cat: Dictionary in Catalog.CATEGORIES:
+		if cat["key"] == key:
+			return cat
+	return Catalog.CATEGORIES[0]
+
+
 func _show_category(key: String, title: String) -> void:
 	_category = key
 	_heading.text = title
+	_rebuild_subbar()
+	_apply_filter()
+
+
+func _choose_sub(sub: String) -> void:
+	_sub[_category] = sub
+	_apply_filter()
+
+
+## The pill row under the heading: "All" and each sub-category with its count, for categories that have them.
+func _rebuild_subbar() -> void:
+	for child in _subbar.get_children():
+		child.queue_free()
+	var subs: Array = _cat_named(_category).get("subs", []) if _category != "all" else []
+	_subbar.visible = not subs.is_empty()
+	if subs.is_empty():
+		return
+	var group := ButtonGroup.new()
+	var chosen: String = _sub.get(_category, "all")
+	var total := 0
+	var entries: Array = []
+	for sub: Dictionary in subs:
+		var n := Catalog.SHOP.filter(func(kind: String) -> bool: return _belongs(kind, _category, sub["key"])).size()
+		total += n
+		entries.append([sub["key"], "%s  (%d)" % [sub["name"], n]])
+	entries.push_front(["all", "All  (%d)" % total])
+	for entry: Array in entries:
+		var b := UI.choice_button(entry[1], group)
+		b.custom_minimum_size.y = 36
+		b.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.button_pressed = entry[0] == chosen
+		b.pressed.connect(_choose_sub.bind(entry[0]))
+		_subbar.add_child(b)
+
+
+## Shows the cards of the chosen category and sub-category, grouped under their sub-category headings.
+func _apply_filter() -> void:
+	var chosen: String = _sub.get(_category, "all")
 	var first := ""
-	for kind: String in _order:
-		var shown: bool = key == "all" or Catalog.SHOP_INFO[kind][0] == key
-		_cards[kind]["panel"].visible = shown
-		if shown and first == "":
-			first = kind
+	var has_subs: bool = _category != "all" and _cat_named(_category).has("subs")
+	for block: Dictionary in _blocks:
+		var in_cat: bool = _category == "all" or block["cat"] == _category
+		var in_sub: bool = not has_subs or chosen == "all" or block["sub"] == chosen
+		block["box"].visible = in_cat and in_sub
+		block["head"].visible = block["sub"] != "" and not (has_subs and chosen != "all")
+		for kind: String in block["kinds"]:
+			_cards[kind]["panel"].visible = in_cat and in_sub
+			if in_cat and in_sub and first == "":
+				first = kind
 	if not _cards[_selected]["panel"].visible and first != "":
 		_select(first)
 
@@ -563,12 +667,17 @@ func _slot_summary(def: Dictionary) -> String:
 	return ", ".join(bits)
 
 
+## 2.0 -> "2", 2.6 -> "2.6".
+func _fmt(v: float) -> String:
+	return ("%.1f" % v).trim_suffix(".0")
+
+
 ## The one line under a part's name on its card: the number that matters most.
 func _gist(def: Dictionary) -> String:
 	if def.has("gen"):
 		return "Makes %s W" % UI.num(def["gen"]["watts"])
 	if def.has("tokens"):
-		return "%d tokens/s  ·  %d W" % [def["tokens"], def.get("watts", 0.0)]
+		return "%s tok/s  ·  %d W%s" % [_fmt(def["tokens"]), def.get("watts", 0.0), "  ·  tier %d" % def["tier"] if def.has("tier") else ""]
 	if def.has("radiator"):
 		return "Sheds %d W per degree" % def["radiator"]
 	if def.has("cool"):
@@ -592,7 +701,7 @@ func _gist(def: Dictionary) -> String:
 func _facts(def: Dictionary) -> Array:
 	var rows := []
 	if def.has("tokens"):
-		rows.append(["Makes", "%d tokens a second" % def["tokens"]])
+		rows.append(["Makes", "%s tokens a second" % _fmt(def["tokens"])])
 	if def.has("gen"):
 		var gen: Dictionary = def["gen"]
 		rows.append(["Generates", "%s W" % UI.num(gen["watts"])])
