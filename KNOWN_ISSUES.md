@@ -41,6 +41,10 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - Fuel no longer competes with income the way it did; generator running costs need another look.
 
 ## Untested
+- The company menu has only been looked at, never clicked: every button, the platform share control,
+  Rent / Buy / Write code / Train from the menu itself. The actions behind them are tested.
+- The lower half of the Model Lab tab (training stack, plan, Train) and the restyled shop, haggling
+  screen and pause menu have not been seen on screen.
 - Breaker trip and reset, and one generator stalling so its share lands on another (written, never triggered in a test).
 - Fuel running out, and wiring a bought house (written, never triggered in a test; only the garage was wired).
 - Fire spreading, a power strip melting at over 2000 W, and a used server with broken protection igniting.

@@ -62,6 +62,9 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
     house, model licence, 12% taxes. Below zero the landlady cuts the garage's internet.
   - Lifetime earnings set the funding stage: unlocks content, +1 slot, token storage x6.
   Every peer sees `world.co` (= `Company.state()`); actions go through `world.request_company()`.
+- UI: `ui.gd` is the design system (Inter + Material Icons from `fonts/`, loaded at runtime by
+  `UI.setup()`; colours, text styles, cards, buttons by kind, chips, pills, bars, tiles). Every screen
+  uses it. `company_menu.gd` is the company menu (Tab): tabs built once and updated in place.
 - Ops screen: `ops_board.gd` is one SubViewport dashboard shown by every `ops_screen.gd` (a fixed one on
   the garage's back wall, plus the buyable `screen` item). Headline numbers are always on it; details
   need sensors (`sensor` in the catalog: thermometer, power meter, coolant sensor). The same gating
@@ -106,7 +109,7 @@ Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, 
 1. DONE — walk around together, carry and throw objects
 2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breakers, money, generators, weather, town, buyable houses. Missing: cooling
 3. MOSTLY DONE — heat, liquid cooling, leaks, fire, extinguisher, strip overload, tripping, dud parts, heat suit. Missing: network loops, generator fumes and noise
-4. STARTED — company layer rules (tokens, slop, products, models, platform, funding stages). Menu UI in progress
+4. MOSTLY DONE — company layer: tokens, slop, products, model market, training stack, platform, funding stages, company menu. Needs balancing
 5. Polish: glow, sound, UI, balance
 
 ## Working style
