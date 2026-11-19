@@ -31,16 +31,27 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Nothing is validated at build time except socket counts and cable length (7 m, then it gets yanked out).
 - Garage circuit: 3600 W. Over that for 1.5 s trips the breaker; a player resets it at the box.
 - Servers earn while powered AND online; GPUs mounted on them add tokens/s and watts.
+- Power roots: the wall circuit, or any generator item (`gen` in the catalog: pedal / fuel / solar).
+  Each root has its own limit; overloading a generator stalls it (or throws the rider off the bike).
+- Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
+- Outside: `scripts/outside.gd` is pure scenery. Plots (`Catalog.PLOTS`) are bought at their sale sign;
+  each has a concrete pad and a fibre pole that works once owned. Plots have no wall power.
+- Collision layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
 
 ## Testing (always do this after changes)
-Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
-- Script errors + logic: `godot_console --headless --path . -- --host --bot --probe=4`
-- Sync: run a headless `--host --probe=9` in the background, then a `--join --bot --probe=7`; the two dumps must match.
-- Visuals: headless host + windowed `--join --shot=file.png`, then look at the image.
+The owner works on this PC while tests run: use `--headless` for everything except screenshots.
+Any test flag puts the game in test mode (mouse is never captured or read).
+Flags go after `--`: `--host`, `--join[=ip]`, `--name=X`, `--bot`, `--yaw=DEG`, `--pos=X,Y,Z`, `--open`,
+`--money=N`, `--selftest`, `--probe=SECONDS`, `--shot=PATH`.
+- Everything at once: `godot_console --headless --path . -- --host --selftest --money=5000 --probe=12`
+  (wires a server, places it on the shelf via a real key press, runs generators, buys a plot, overloads the bike).
+- Sync: headless host with `--probe` in the background, then a headless `--join --probe=N`; the two dumps must match.
+- Visuals (rare): `godot_console --position 6000,6000 --path . -- --host --open --pos=.. --yaw=.. --shot=file.png`,
+  then look at the image. This opens a real (off-screen) window.
 
 ## Milestones
 1. DONE — walk around together, carry and throw objects
-2. MOSTLY DONE — shop, racks, servers, GPUs, power + network cables, breaker, money. Missing: cooling
+2. MOSTLY DONE — shop, racks, servers, GPUs, cables, breaker, money, generators, outdoors, plots. Missing: cooling
 3. Chaos: heat, breakers, leaks, network loops, trip-over cables, sketchy used hardware
 4. Company layer: products, AI models, shop, progression, bigger locations
 5. Polish: glow, sound, UI, balance

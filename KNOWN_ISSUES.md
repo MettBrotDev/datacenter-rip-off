@@ -9,9 +9,13 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - A placed (pinned) item ignores physics: thrown objects bounce off it and cannot knock it over.
 - No cooling, heat or fire yet.
 - Two players can stand inside each other.
+- You can build on a plot you do not own; only its fibre pole is locked.
+- Generators have no downsides yet (no noise, fumes or fire), and there is no day/night for solar.
+- A pedalling player is glued to the bike but has no sitting pose.
 
 ## Untested
 - Breaker trip and reset (written, never triggered in a test).
+- Fuel running out, solar panels, and the fibre pole on a bought plot (written, never triggered in a test).
 - Cable yanked out at 7 m (written, never triggered in a test).
 - A real connection over Tailscale (only same-PC connections were tested).
 - Settings menu has never been looked at on screen.
