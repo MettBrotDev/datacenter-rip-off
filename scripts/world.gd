@@ -99,8 +99,9 @@ func debug_dump() -> String:
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
 	for it: Item in items.values():
-		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d" % [
-			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status]
+		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d speed=%.3f asleep=%s" % [
+			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status,
+			it.linear_velocity.length() + it.angular_velocity.length(), it.sleeping]
 	return out
 
 
@@ -112,6 +113,11 @@ func request_grab(id: int) -> void:
 
 func request_release(throw: bool) -> void:
 	_to_host(&"_h_release", [throw])
+
+
+## Put the held item down exactly at xf, at rest.
+func request_place(xf: Transform3D) -> void:
+	_to_host(&"_h_place", [xf])
 
 
 func request_attach(parent_id: int) -> void:
@@ -230,6 +236,18 @@ func _h_release(throw: bool) -> void:
 		if hit:
 			xf.origin = from.lerp(hit["position"], 0.6)
 	_cast(&"_r_release", [it.id, xf, vel])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_place(xf: Transform3D) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := Net.sender()
+	var it := held_by(peer)
+	var p := player(peer)
+	if it == null or p == null or p.position.distance_to(xf.origin) > 5.0:
+		return
+	_cast(&"_r_release", [it.id, xf.orthonormalized(), Vector3.ZERO])
 
 
 @rpc("any_peer", "call_remote", "reliable")

@@ -84,7 +84,7 @@ func _ready() -> void:
 	hints.size_flags_vertical = Control.SIZE_SHRINK_END
 	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hints)
-	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Use   F Power cable   G Network cable   Esc Pause", 14, UI.DIM))
+	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Use   R Rotate   F Power cable   G Network cable   Esc Pause", 14, UI.DIM))
 
 	_shop = Shop.new()
 	_shop.world = get_parent()

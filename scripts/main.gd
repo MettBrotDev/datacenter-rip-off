@@ -28,7 +28,7 @@ func _ready() -> void:
 
 func _setup_input() -> void:
 	var keys := {"fwd": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R}
 	for action: String in keys:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = keys[action]
@@ -103,3 +103,8 @@ func _selftest() -> void:
 		if it.kind == "rack":
 			world.request_grab(server.id)
 			world.request_attach(it.id)
+	# precise placement: put a crate on the middle shelf board
+	await get_tree().create_timer(0.5).timeout
+	world.player(1).position = Vector3(2.5, 0, -1.0)
+	world.request_grab(by_kind["crate"].id)
+	world.request_place(Transform3D(Basis(), Vector3(4.13, 1.26, -1.5)))

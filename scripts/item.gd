@@ -102,10 +102,12 @@ func net_target(pos: Vector3, rot: Quaternion) -> void:
 
 
 ## Call after changing holder/parent. Layer 2 = loose, layer 4 = attached (ray-only), 0 = held.
+## Loose items collide with the world and each other (mask 3), never with players.
 func apply_mode() -> void:
 	_has_target = false
 	freeze = not is_loose() or not multiplayer.is_server()
-	collision_layer = 2 if is_loose() else (4 if holder == 0 else 0)
+	var loose_layer := 2 | (16 if def.get("solid", false) else 0)   # 16 = players cannot walk through
+	collision_layer = loose_layer if is_loose() else (4 if holder == 0 else 0)
 	collision_mask = 3 if is_loose() else 0
 
 

@@ -23,8 +23,12 @@ var _blob: Node3D
 var _cam: Camera3D
 var _ray: RayCast3D
 var _settings: Node
-var _tick := 0
+var _send_t := 0.0
+var _bot_t := 0.0
 var _last_pos := Vector3.ZERO
+var _ghost: MeshInstance3D    # preview of where the held item would be placed
+var _place_xf: Variant = null # Transform3D of that spot, or null when there is none
+var _place_turns := 0         # extra quarter turns chosen with R
 var _cable: Dictionary = {}   # cable end in hand: {"id": item id, "type": "power" | "net"}
 var _acts: Array = []         # what the keys do right now: [[input action, prompt text, Callable]]
 
@@ -35,6 +39,10 @@ func _ready() -> void:
 	is_local = peer_id == multiplayer.get_unique_id()
 	var info: Dictionary = Net.players.get(peer_id, {"name": "?", "color": Color.WHITE})
 
+	# Layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
+	# Players walk through small items on purpose: bumping them made everything twitch.
+	collision_layer = 8
+	collision_mask = 1 | 8 | 16
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.35
 	cap.height = 1.6
@@ -67,6 +75,16 @@ func _ready() -> void:
 		_ray.add_exception(self)
 		head.add_child(_ray)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		var ghost_mat := StandardMaterial3D.new()
+		ghost_mat.albedo_color = Color(0.3, 1.0, 0.6, 0.35)
+		ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_ghost = MeshInstance3D.new()
+		_ghost.mesh = BoxMesh.new()
+		_ghost.material_override = ghost_mat
+		_ghost.top_level = true
+		_ghost.visible = false
+		add_child(_ghost)
 		if _settings:
 			_settings.changed.connect(_apply_settings)
 		_apply_settings()
@@ -105,11 +123,13 @@ func _unhandled_input(e: InputEvent) -> void:
 			return
 
 
-func _physics_process(dt: float) -> void:
+## Runs every rendered frame (not on the physics tick) so motion is smooth at any refresh rate.
+func _process(dt: float) -> void:
 	if is_local:
 		_move(dt)
-		_tick += 1
-		if _tick % 2 == 0:
+		_send_t += dt
+		if _send_t >= 1.0 / 30.0:
+			_send_t = 0.0
 			Net.send_state(position, rotation.y, head.rotation.x)
 		_update_actions()
 	else:
@@ -148,14 +168,16 @@ func _move(dt: float) -> void:
 
 func _bot(dt: float) -> void:
 	rotation.y += dt * 1.2
-	if _tick == 60:
+	var before := _bot_t
+	_bot_t += dt
+	if before < 1.0 and _bot_t >= 1.0:
 		var nearest: Node3D = null
 		for it: Node3D in _world.items.values():
 			if nearest == null or position.distance_to(it.position) < position.distance_to(nearest.position):
 				nearest = it
 		if nearest:
 			_world.request_grab(nearest.id)
-	elif _tick == 150:
+	elif before < 2.5 and _bot_t >= 2.5:
 		_world.request_release(true)
 
 
@@ -174,6 +196,7 @@ func _update_actions() -> void:
 	var t := _target()
 	var held: Node3D = _world.held_by(peer_id)
 	var acts: Array = []
+	_place_xf = null
 	if not _cable.is_empty() and (held or not _world.items.has(_cable["id"])):
 		_set_cable({})
 	if not _cable.is_empty():
@@ -190,7 +213,12 @@ func _update_actions() -> void:
 		if t is RigidBody3D and _world.can_attach(held, t):
 			acts.append(["interact", "[E] Mount on %s" % t.label.to_lower(), _world.request_attach.bind(t.id)])
 		else:
-			acts.append(["interact", "[E] Put down", _world.request_release.bind(false)])
+			_place_xf = _placement(held)
+			if _place_xf != null:
+				acts.append(["interact", "[E] Place here", _place])
+				acts.append(["rotate", "[R] Rotate", _rotate])
+			else:
+				acts.append(["interact", "[E] Drop", _world.request_release.bind(false)])
 		acts.append(["throw", "[Click] Throw", _world.request_release.bind(true)])
 	elif t is RigidBody3D:
 		acts.append(["interact", "[E] %s %s" % ["Pull out" if t.parent != 0 else "Pick up", t.label.to_lower()],
@@ -221,6 +249,28 @@ func _update_actions() -> void:
 	for act: Array in acts:
 		lines.append(act[1])
 	_world.hud.set_prompt("\n".join(lines))
+	_ghost.visible = _place_xf != null
+	if _place_xf != null:
+		(_ghost.mesh as BoxMesh).size = held.def["size"]
+		_ghost.global_transform = _place_xf
+
+
+## Where the held item would sit if placed now: flat on the surface under the crosshair,
+## front towards the player. Null when not looking at a surface you can put things on.
+func _placement(held: Node3D) -> Variant:
+	if not _ray.is_colliding() or _ray.get_collision_normal().y < 0.7:
+		return null
+	var size: Vector3 = held.def["size"]
+	var yaw := rotation.y + PI + _place_turns * PI * 0.5
+	return Transform3D(Basis(Vector3.UP, yaw), _ray.get_collision_point() + Vector3.UP * (size.y * 0.5 + 0.01))
+
+
+func _place() -> void:
+	_world.request_place(_place_xf)
+
+
+func _rotate() -> void:
+	_place_turns += 1
 
 
 func _set_cable(cable: Dictionary) -> void:

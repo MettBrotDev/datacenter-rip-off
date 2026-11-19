@@ -7,6 +7,7 @@ extends RefCounted
 ##   power_port  has a power cable        net_port  has a network cable
 ##   provides    "power" | "net" — other cables can plug into it, up to `sockets`
 ##   watts, tokens   power draw and compute output while running
+##   solid       players cannot walk through it (small items are walk-through on purpose)
 ##   shapes      [[size, offset]...] collision boxes (default: one box of `size`)
 ##   parts       [[size, offset, colour, emission, tag]...] visual boxes; tag "led" = status light
 
@@ -65,7 +66,7 @@ static func _build() -> Dictionary:
 				[Vector3(0.28, 0.045, 0.16), Vector3.ZERO, Color(0.13, 0.18, 0.3), 0.0],
 				[Vector3(0.2, 0.01, 0.01), Vector3(-0.02, 0.01, -0.081), Color(0.2, 1.0, 0.5), 2.5, "led"],
 			]},
-		"rack": {"label": "Open rack", "price": 250,
+		"rack": {"label": "Open rack", "price": 250, "solid": true,
 			"slots": {"accepts": "server", "yaw": 0.0, "at": [
 				Vector3(0, -0.62, 0), Vector3(0, -0.22, 0), Vector3(0, 0.18, 0), Vector3(0, 0.58, 0)]},
 			"size": Vector3(0.6, 1.8, 0.75), "mass": 25.0,
@@ -75,8 +76,8 @@ static func _build() -> Dictionary:
 			"parts": [
 				[Vector3(0.6, 0.05, 0.75), Vector3(0, -0.875, 0), dark, 0.0],
 				[Vector3(0.6, 0.05, 0.75), Vector3(0, 0.875, 0), dark, 0.0],
-				[Vector3(0.03, 1.8, 0.75), Vector3(-0.285, 0, 0), Color(0.14, 0.12, 0.2), 0.0],
-				[Vector3(0.03, 1.8, 0.75), Vector3(0.285, 0, 0), Color(0.14, 0.12, 0.2), 0.0],
+				[Vector3(0.03, 1.8, 0.75), Vector3(-0.285, 0, 0), Color(0.26, 0.23, 0.38), 0.0],
+				[Vector3(0.03, 1.8, 0.75), Vector3(0.285, 0, 0), Color(0.26, 0.23, 0.38), 0.0],
 				[Vector3(0.6, 0.02, 0.02), Vector3(0, 0.89, -0.37), purple, 3.0],
 				[Vector3(0.02, 1.7, 0.02), Vector3(-0.29, 0, -0.37), purple, 2.0],
 				[Vector3(0.02, 1.7, 0.02), Vector3(0.29, 0, -0.37), purple, 2.0],

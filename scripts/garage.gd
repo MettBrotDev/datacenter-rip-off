@@ -48,9 +48,9 @@ func _ready() -> void:
 
 	# metal shelf on the right wall
 	for y: float in [0.45, 1.05, 1.65]:
-		_box(Vector3(0.5, 0.04, 1.8), Vector3(W / 2 - 0.27, y, -1.5), metal)
+		_box(Vector3(0.7, 0.04, 1.8), Vector3(W / 2 - 0.37, y, -1.5), metal)
 	for z: float in [-2.38, -0.62]:
-		for x: float in [W / 2 - 0.5, W / 2 - 0.04]:
+		for x: float in [W / 2 - 0.7, W / 2 - 0.04]:
 			_box(Vector3(0.04, 1.9, 0.04), Vector3(x, 0.95, z), metal, false)
 
 	# things players interact with (ids are fixed: host and clients must agree)
