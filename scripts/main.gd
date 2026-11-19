@@ -148,7 +148,10 @@ func _selftest() -> void:
 	world.request_grab(by_kind["fuel"].id)
 	world.request_refuel(by_kind["gen_mower"].id)
 	world.request_use(by_kind["gen_bike"].id)
-	world.request_buy_plot("backyard")
+	# real estate: insult neighbour 17 (next door, east), then pay well over the odds
+	world.request_offer(17, 1000)
+	world.request_offer(17, 40000)
+	world.request_house_door(17)
 	# overload: the 250 W bike cannot carry a 260 W server, so the rider gets thrown off
 	await get_tree().create_timer(1.0).timeout
 	world.request_link(strip.id, "power", 0)
@@ -162,3 +165,9 @@ func _selftest() -> void:
 			me.position = Vector3(6, 0, 3)
 			world.request_grab(it.id)
 			world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 2)))
+	# plug the server into the new house's wiring, then knock house 16 down after buying it
+	await get_tree().create_timer(0.5).timeout
+	world.request_link(server.id, "power", 0)
+	world.request_offer(16, 30000)
+	world.request_demolish(16)
+	world.request_demolish(16)

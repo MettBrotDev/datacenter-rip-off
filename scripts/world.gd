@@ -18,7 +18,22 @@ const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3
 const DELIVERY := Vector3(2.6, 1.0, 1.8)   # next to the roller door
 const SIM_STEP := 0.5
 const Weather = preload("res://scripts/weather.gd")
-const OUTSIDE := "res://scripts/outside.gd"   # scenery around the garage
+const House = preload("res://scripts/house.gd")
+const Town = preload("res://scripts/town.gd")
+const OUTSIDE := "res://scripts/outside.gd"   # scenery: the town around the garage
+const GARAGE_CIRCUIT := 1000                  # houses use their own id as circuit id
+# What a neighbour says to an offer, by how close it was to the price they have in mind.
+const HAGGLE := {
+	"insult": ["Is that a joke? Get off my lawn.", "My garden gnome is worth more than that.",
+		"I have had better offers from the raccoons."],
+	"low": ["No. Come back with a real number.", "For that money you can have the mailbox.",
+		"My sister says the market is hot. No."],
+	"close": ["Tempting... but no. A little more and we might talk.", "You are close. Add a bit and I start packing.",
+		"Hm. Almost. I do like this kitchen though."],
+	"deal": ["Sold! I always hated this street anyway.", "Deal. The fridge stays, I cannot lift it.",
+		"Done. Do not ask about the smell in the bedroom."],
+	"done": ["I am done talking to you for now. Come back later."],
+}
 
 var items: Dictionary = {}      # item id (> 0) -> Item
 var fixtures: Dictionary = {}   # fixture id (< 0) -> Fixture
@@ -28,10 +43,11 @@ var preview: Dictionary = {}    # cable end the local player is carrying: {"id",
 var money := 0.0
 var tokens := 0.0
 var watts := 0.0
-var tripped := false
+var tripped := false             # any breaker off
+var tripped_circuits: Array = [] # which ones
+var houses: Dictionary = {}      # house id -> House (0 is our own)
 var door_open := false
 var capacity := 0.0             # watts available right now (grid + running generators)
-var owned: Dictionary = {}      # plot key -> true once bought
 
 var weather := 0                # index into Catalog.WEATHER
 
@@ -40,6 +56,8 @@ var _weather: Weather
 var _players: Node3D
 var _items: Node3D
 var _sim: Sim                   # host only
+var _haggle: Dictionary = {}    # host only: house id -> {"reserve", "mood", "until"}
+var _demolish_asked: Dictionary = {}   # host only: house id -> time of the first press
 var _next_id := 1
 var _tick := 0
 var _sim_t := 0.0
@@ -51,7 +69,9 @@ func _ready() -> void:
 	fixtures = _garage.fixtures
 	if ResourceLoader.exists(OUTSIDE):
 		add_child(load(OUTSIDE).new())
-	_build_plots()
+	for f: Node3D in fixtures.values():
+		f.circuit = GARAGE_CIRCUIT
+	_build_houses()
 	_weather = Weather.new()
 	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
 	add_child(_weather)
@@ -71,6 +91,7 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		_sim = Sim.new()
 		_spawn_starting_items()
+		_spawn_furniture()
 		_sim_step(0.0)
 	else:
 		_h_snapshot.rpc_id(1)
@@ -110,9 +131,26 @@ func ridden_by(peer: int) -> Item:
 	return null
 
 
-## Anywhere that is not under the garage roof. Solar panels only work out there.
+## Anywhere without a roof overhead. Solar panels only work out there.
 func is_outdoors(pos: Vector3) -> bool:
-	return absf(pos.x) > 5.5 or absf(pos.z) > 4.5
+	if absf(pos.x) < 5.5 and absf(pos.z) < 4.5:
+		return false   # the garage
+	for h: House in houses.values():
+		if h.state != House.GONE:
+			var local := h.to_local(pos)
+			var half: Vector2 = Town.FOOTPRINTS[h.lot["size"]] * 0.5
+			if absf(local.x) < half.x and absf(local.z) < half.y:
+				return false
+	return true
+
+
+## Breaker circuits we can use: circuit id -> [limit in watts, where it is].
+func circuits() -> Dictionary:
+	var out := {GARAGE_CIRCUIT: [Catalog.BREAKER_WATTS, "the garage"]}
+	for h: House in houses.values():
+		if h.state != House.NEIGHBOUR:
+			out[h.id] = [Town.CIRCUIT_WATTS[h.lot["size"]], "our house" if h.id == 0 else "%s' old place" % h.lot["name"]]
+	return out
 
 
 func can_attach(child: Item, par: Item) -> bool:
@@ -123,7 +161,7 @@ func can_attach(child: Item, par: Item) -> bool:
 
 func debug_dump() -> String:
 	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f/%.0f tripped=%s door=%s owned=%s weather=%s" % [
-		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, capacity, tripped, door_open, owned.keys(),
+		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, capacity, tripped_circuits, door_open, _owned_ids(),
 		Catalog.WEATHER[weather]["name"]]
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
@@ -164,8 +202,8 @@ func request_buy(kind: String) -> void:
 	_to_host(&"_h_buy", [kind])
 
 
-func request_breaker() -> void:
-	_to_host(&"_h_breaker", [])
+func request_breaker(circuit: int) -> void:
+	_to_host(&"_h_breaker", [circuit])
 
 
 func request_door() -> void:
@@ -182,66 +220,47 @@ func request_refuel(id: int) -> void:
 	_to_host(&"_h_refuel", [id])
 
 
-func request_buy_plot(key: String) -> void:
-	_to_host(&"_h_buy_plot", [key])
+## Offer a neighbour money for their house. The answer comes back through hud.offer_reply().
+func request_offer(house_id: int, amount: int) -> void:
+	_to_host(&"_h_offer", [house_id, amount])
 
 
-# --- plots ------------------------------------------------------------------
+func request_house_door(house_id: int) -> void:
+	_to_host(&"_h_house_door", [house_id])
 
-## Each plot: a concrete pad, a sale sign you buy it at, and a fibre pole that works once owned.
-func _build_plots() -> void:
-	var Fixture := preload("res://scripts/fixture.gd")
-	var pad_mat := StandardMaterial3D.new()
-	pad_mat.albedo_color = Color(0.62, 0.62, 0.6)
-	pad_mat.roughness = 0.9
-	var body := StaticBody3D.new()
-	add_child(body)
-	var next_id := -100
-	for key: String in Catalog.PLOTS:
-		var plot: Dictionary = Catalog.PLOTS[key]
-		var size := Vector3(plot["size"].x, 0.3, plot["size"].y)
-		var mesh := BoxMesh.new()
-		mesh.size = size
-		mesh.material = pad_mat
-		var pad := MeshInstance3D.new()
-		pad.mesh = mesh
-		pad.position = plot["center"] + Vector3(0, -0.13, 0)   # top 2 cm above the grass
-		add_child(pad)
-		var shape := BoxShape3D.new()
-		shape.size = size
-		var col := CollisionShape3D.new()
-		col.shape = shape
-		col.position = pad.position
-		body.add_child(col)
 
-		var board := Fixture.new()
-		board.setup(next_id, "sign")
-		board.tag = key
-		board.label = plot["label"]
-		board.position = plot["sign"]
-		board.rotation.y = deg_to_rad(plot["sign_yaw"])
-		board.set_lamp(1)   # orange = for sale, green once sold
-		add_child(board)
-		fixtures[next_id] = board
-		var text := Label3D.new()
-		text.name = "Text"
-		text.text = "FOR SALE\n%s\n%s" % [plot["label"], UI.money(plot["price"])]
-		text.position = Vector3(0, 1.5, 0.03)
-		text.font_size = 40
-		text.pixel_size = 0.004
-		text.modulate = Color(0.08, 0.1, 0.16)
-		text.outline_size = 0
-		board.add_child(text)
+## Has to be asked twice within a few seconds before anything happens.
+func request_demolish(house_id: int) -> void:
+	_to_host(&"_h_demolish", [house_id])
 
-		var pole := Fixture.new()
-		pole.setup(next_id - 1, "uplink")
-		pole.tag = key
-		pole.position = plot["pole"]
-		pole.rotation.y = deg_to_rad(plot["sign_yaw"])
-		pole.set_lamp(0)
-		add_child(pole)
-		fixtures[next_id - 1] = pole
-		next_id -= 2
+
+# --- houses -----------------------------------------------------------------
+
+func _build_houses() -> void:
+	var all: Array = [Town.HOME_HOUSE]
+	all.append_array(Town.lots())
+	for lot: Dictionary in all:
+		var h := House.new()
+		add_child(h)
+		h.setup(lot)
+		houses[h.id] = h
+		fixtures.merge(h.fixtures)
+
+
+func _owned_ids() -> Array:
+	var out := []
+	for h: House in houses.values():
+		if h.state != House.NEIGHBOUR:
+			out.append("%d%s" % [h.id, "(gone)" if h.state == House.GONE else ""])
+	return out
+
+
+## Host: everyone left their furniture behind. It is ordinary carryable stuff.
+func _spawn_furniture() -> void:
+	for h: House in houses.values():
+		for spot: Array in h.furniture():
+			_cast(&"_r_spawn", [_next_id, spot[0], spot[1], [0, 0, 0, 0, 0, true]])
+			_next_id += 1
 
 
 # --- players ----------------------------------------------------------------
@@ -306,8 +325,11 @@ func _h_snapshot() -> void:
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
 				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
 	_r_door.rpc_id(peer, door_open)
-	for key: String in owned:
-		_r_plot.rpc_id(peer, key)
+	for h: House in houses.values():
+		if h.id != 0 and h.state != House.NEIGHBOUR:
+			_r_house.rpc_id(peer, h.id, h.state)
+		if h.door_open:
+			_r_house_door.rpc_id(peer, h.id, true)
 	ready_peers.append(peer)
 	_sim_step(0.0)
 
@@ -409,11 +431,11 @@ func _h_buy(kind: String) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _h_breaker() -> void:
-	if not multiplayer.is_server() or not _sim.tripped:
+func _h_breaker(circuit: int) -> void:
+	if not multiplayer.is_server() or not _sim.tripped.has(circuit):
 		return
-	_sim.reset_breaker()
-	_cast(&"_r_toast", ["%s reset the breaker" % name_of(Net.sender())])
+	_sim.reset_breaker(circuit)
+	_cast(&"_r_toast", ["%s reset the breaker in %s" % [name_of(Net.sender()), circuits()[circuit][1]]])
 	_sim_step(0.0)
 
 
@@ -463,15 +485,65 @@ func _h_refuel(id: int) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _h_buy_plot(key: String) -> void:
-	if not multiplayer.is_server() or not Catalog.PLOTS.has(key) or owned.has(key):
+func _h_offer(house_id: int, amount: int) -> void:
+	if not multiplayer.is_server():
 		return
-	var plot: Dictionary = Catalog.PLOTS[key]
-	if _sim.money < plot["price"]:
+	var peer := Net.sender()
+	var h: House = houses.get(house_id)
+	if h == null or h.state != House.NEIGHBOUR or amount <= 0 or amount > _sim.money:
 		return
-	_sim.money -= plot["price"]
-	_cast(&"_r_plot", [key])
-	_cast(&"_r_toast", ["%s bought the %s (-%s)" % [name_of(Net.sender()), plot["label"].to_lower(), UI.money(plot["price"])]])
+	if not _haggle.has(house_id):   # what they would really take; they never say
+		_haggle[house_id] = {"reserve": h.lot["value"] * randf_range(0.9, 1.5), "mood": 3, "until": 0}
+	var deal: Dictionary = _haggle[house_id]
+	var who: String = h.lot["name"]
+	var mood := "done"
+	if Time.get_ticks_msec() >= deal["until"]:
+		var ratio: float = amount / deal["reserve"]
+		mood = "deal" if ratio >= 1.0 else ("close" if ratio >= 0.85 else ("low" if ratio >= 0.5 else "insult"))
+		if mood == "deal":
+			_sim.money -= amount
+			_cast(&"_r_house", [house_id, House.OURS])
+			_cast(&"_r_toast", ["%s bought the house of %s for %s" % [name_of(peer), who, UI.money(amount)]])
+			_sim_step(0.0)
+		else:
+			deal["mood"] -= 2 if mood == "insult" else 1
+			if mood == "insult":
+				deal["reserve"] *= 1.08   # now it is personal
+			if deal["mood"] <= 0:
+				deal["mood"] = 3
+				deal["until"] = Time.get_ticks_msec() + 90000
+				_cast(&"_r_toast", ["%s annoyed %s. They went inside for a while." % [name_of(peer), who]])
+	var lines: Array = HAGGLE[mood]
+	var reply := [house_id, lines[randi() % lines.size()], mood == "deal"]
+	if peer == multiplayer.get_unique_id():
+		callv(&"_r_offer_reply", reply)
+	else:
+		callv(&"rpc_id", [peer, &"_r_offer_reply"] + reply)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_house_door(house_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var h: House = houses.get(house_id)
+	if h and h.state == House.OURS:
+		_cast(&"_r_house_door", [house_id, not h.door_open])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_demolish(house_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var h: House = houses.get(house_id)
+	if h == null or h.state != House.OURS or house_id == 0:
+		return
+	var now := Time.get_ticks_msec()
+	if now - int(_demolish_asked.get(house_id, -100000)) > 6000:
+		_demolish_asked[house_id] = now
+		_cast(&"_r_toast", ["%s wants to DEMOLISH this house. Press again to confirm." % name_of(Net.sender())])
+		return
+	_cast(&"_r_house", [house_id, House.GONE])
+	_cast(&"_r_toast", ["%s knocked the house down. A building pad is all that is left." % name_of(Net.sender())])
 	_sim_step(0.0)
 
 
@@ -519,7 +591,7 @@ func _sim_step(dt: float) -> void:
 	for it: Item in items.values():
 		if it.def.has("gen"):
 			gens[it.id] = [it.running, it.fuel, it.rider, it.load]
-	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped, _sim.weather], status, gens])
+	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped.keys(), _sim.weather], status, gens])
 
 
 ## A pinned item whose support was taken away (the crate under it got picked up...) falls.
@@ -560,6 +632,7 @@ func _r_spawn(id: int, kind: String, xf: Transform3D, st: Array) -> void:
 	it.pinned = st[5]
 	_items.add_child(it)
 	it.global_transform = xf
+	it._pin_xf = xf
 	items[id] = it
 	if multiplayer.is_server():
 		it.sleeping_state_changed.connect(_on_item_sleep.bind(it))
@@ -613,7 +686,8 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 	tokens = company[1]
 	watts = company[2]
 	capacity = company[3]
-	tripped = company[5]
+	tripped_circuits = company[5]
+	tripped = not tripped_circuits.is_empty()
 	weather = company[6]
 	_weather.set_weather(weather)
 	hud.set_weather(weather)
@@ -628,7 +702,9 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 			it.fuel = gens[id][1]
 			it.rider = gens[id][2]
 			it.load = gens[id][3]
-	fixtures[-4].set_lamp(1 if tripped else 2)
+	for f: Node3D in fixtures.values():
+		if f.kind == "breaker":
+			f.set_lamp(1 if tripped_circuits.has(f.circuit) else 2)
 	hud.set_stats(money, tokens, watts, capacity, company[4], tripped)
 
 
@@ -641,16 +717,23 @@ func _r_despawn(id: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _r_plot(key: String) -> void:
-	owned[key] = true
-	for f: Node3D in fixtures.values():
-		if f.tag != key:
-			continue
-		f.set_lamp(2)
-		if f.kind == "uplink":
-			f.provides = "net"
-		else:
-			f.get_node("Text").text = "SOLD\n%s" % Catalog.PLOTS[key]["label"]
+func _r_house(house_id: int, state: int) -> void:
+	var h: House = houses[house_id]
+	var before := h.fixtures.keys()
+	h.set_state(state)
+	for id: int in before:   # the neighbour, and after a demolition the door, are gone
+		if not h.fixtures.has(id):
+			fixtures.erase(id)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_house_door(house_id: int, open: bool) -> void:
+	houses[house_id].set_door(open)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_offer_reply(house_id: int, text: String, accepted: bool) -> void:
+	hud.offer_reply(house_id, text, accepted)
 
 
 @rpc("authority", "call_remote", "reliable")

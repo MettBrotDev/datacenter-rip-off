@@ -268,29 +268,29 @@ func _update_actions() -> void:
 		match t.kind:
 			"shop":
 				acts.append(["interact", "[E] Open the parts market", _world.hud.open_shop])
-			"sign":
-				var plot: Dictionary = Catalog.PLOTS[t.tag]
-				if _world.owned.has(t.tag):
-					acts.append(["", "%s: yours" % plot["label"], Callable()])
-				elif _world.money >= plot["price"]:
-					acts.append(["interact", "[E] Buy the %s for %s" % [plot["label"].to_lower(), UI.money(plot["price"])],
-							_world.request_buy_plot.bind(t.tag)])
+			"neighbour":
+				acts.append(["interact", "[E] Talk to %s about buying their house" % t.label, _world.hud.open_offer.bind(t.house)])
+			"hdoor":
+				var home: Node3D = _world.houses[t.house]
+				if home.state == 0:
+					acts.append(["", "Locked. This is the house of %s." % home.lot["name"], Callable()])
 				else:
-					acts.append(["", "%s: %s. You are %s short." % [plot["label"], UI.money(plot["price"]),
-							UI.money(plot["price"] - _world.money)], Callable()])
-			"uplink":
-				if t.provides == "":
-					acts.append(["", "Fibre pole: buy this plot to connect it", Callable()])
+					acts.append(["interact", "[E] %s the door" % ("Close" if home.door_open else "Open"),
+							_world.request_house_door.bind(t.house)])
+			"deed":
+				if t.house == 0:
+					acts.append(["", "The deed to your house. Framed, because you are proud of it.", Callable()])
 				else:
-					acts.append(["", "Fibre pole: %d/%d sockets used" % [_world.sockets_used(t.id, "net"), t.sockets], Callable()])
+					acts.append(["interact", "[E] Demolish this house (press twice)", _world.request_demolish.bind(t.house)])
 			"door":
 				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
 						_world.request_door])
 			"breaker":
-				if _world.tripped:
-					acts.append(["interact", "[E] Reset the breaker", _world.request_breaker])
+				var limit: float = _world.circuits().get(t.circuit, [0.0])[0]
+				if _world.tripped_circuits.has(t.circuit):
+					acts.append(["interact", "[E] Reset the breaker", _world.request_breaker.bind(t.circuit)])
 				else:
-					acts.append(["", "Breaker box: %d / %d W" % [_world.watts, Catalog.BREAKER_WATTS], Callable()])
+					acts.append(["", "Breaker box: this building can take %d W" % limit, Callable()])
 			_:
 				acts.append(["", "%s: %d/%d sockets used" % [t.label, _world.sockets_used(t.id, t.provides), t.sockets], Callable()])
 	_acts = acts

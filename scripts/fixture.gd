@@ -1,6 +1,6 @@
 extends StaticBody3D
 ## Something bolted to the building that players interact with: wall outlets, the internet
-## uplink, the breaker box, the shop laptop. Ids are negative so they never clash with items.
+## uplink, breaker boxes, the shop laptop, front doors, neighbours. Ids are negative so they never clash with items.
 ## Local frame: origin on the wall (or table) surface, front facing +Z.
 
 const Catalog = preload("res://scripts/catalog.gd")
@@ -13,7 +13,7 @@ const KINDS := {
 	]},
 	"router": {"label": "Internet uplink", "provides": "net", "sockets": 4, "size": Vector3(0.34, 0.22, 0.07), "parts": [
 		[Vector3(0.34, 0.22, 0.06), Vector3(0, 0, 0.03), Color(0.93, 0.93, 0.95), 0.0],
-		[Vector3(0.22, 0.012, 0.01), Vector3(-0.03, 0.06, 0.062), Color(0.2, 1.0, 0.5), 2.5],
+		[Vector3(0.22, 0.012, 0.01), Vector3(-0.03, 0.06, 0.062), Color(0.2, 1.0, 0.5), 2.5, "lamp"],
 		[Vector3(0.24, 0.04, 0.01), Vector3(0, -0.05, 0.062), Color(0.12, 0.12, 0.14), 0.0],
 	]},
 	"breaker": {"label": "Breaker box", "provides": "", "sockets": 0, "size": Vector3(0.36, 0.5, 0.1), "parts": [
@@ -25,18 +25,19 @@ const KINDS := {
 		[Vector3(0.14, 0.2, 0.05), Vector3(0, 0, 0.025), Color(0.85, 0.75, 0.15), 0.0],
 		[Vector3(0.07, 0.07, 0.02), Vector3(0, 0.03, 0.055), Color(0.2, 1.0, 0.5), 2.5],
 	]},
-	"sign": {"label": "For sale", "provides": "", "sockets": 0,
-		"size": Vector3(1.3, 0.9, 0.12), "center": Vector3(0, 1.5, 0), "parts": [
-			[Vector3(0.09, 1.9, 0.09), Vector3(0, 0.95, -0.06), Color(0.45, 0.3, 0.18), 0.0],
-			[Vector3(1.3, 0.9, 0.05), Vector3(0, 1.5, 0), Color(0.95, 0.95, 0.92), 0.0],
-			[Vector3(1.3, 0.08, 0.06), Vector3(0, 1.91, 0), Color(0.2, 1.0, 0.5), 2.0, "lamp"],
+	"hdoor": {"label": "Front door", "provides": "", "sockets": 0,
+		"size": Vector3(1.2, 2.1, 0.1), "center": Vector3(0.6, 1.05, 0), "parts": [
+			[Vector3(1.2, 2.1, 0.07), Vector3(0.6, 1.05, 0), Color(0.5, 0.22, 0.16), 0.0],
+			[Vector3(0.06, 0.16, 0.14), Vector3(1.05, 1.0, 0), Color(0.9, 0.8, 0.3), 0.0],
+			[Vector3(0.5, 0.5, 0.08), Vector3(0.6, 1.5, 0), Color(0.6, 0.3, 0.22), 0.0],
 		]},
-	"uplink": {"label": "Fibre pole", "provides": "", "sockets": 4,
-		"size": Vector3(0.44, 0.34, 0.26), "center": Vector3(0, 1.3, 0.12), "parts": [
-			[Vector3(0.14, 3.2, 0.14), Vector3(0, 1.6, 0), Color(0.4, 0.28, 0.18), 0.0],
-			[Vector3(0.4, 0.3, 0.12), Vector3(0, 1.3, 0.13), Color(0.93, 0.93, 0.95), 0.0],
-			[Vector3(0.26, 0.02, 0.01), Vector3(0, 1.38, 0.195), Color(0.2, 1.0, 0.5), 2.5, "lamp"],
-		]},
+	"neighbour": {"label": "Neighbour", "provides": "", "sockets": 0,
+		"size": Vector3(0.9, 1.7, 0.9), "center": Vector3(0, 0.85, 0), "parts": []},
+	"deed": {"label": "Deed to the house", "provides": "", "sockets": 0, "size": Vector3(0.4, 0.5, 0.05), "parts": [
+		[Vector3(0.4, 0.5, 0.03), Vector3(0, 0, 0.015), Color(0.45, 0.3, 0.18), 0.0],
+		[Vector3(0.32, 0.42, 0.01), Vector3(0, 0, 0.032), Color(0.96, 0.94, 0.85), 0.0],
+		[Vector3(0.08, 0.08, 0.01), Vector3(0.09, -0.13, 0.038), Color(0.85, 0.15, 0.12), 0.0],
+	]},
 	"shop": {"label": "Shop laptop", "provides": "", "sockets": 0,
 		"size": Vector3(0.42, 0.3, 0.3), "center": Vector3(0, 0.15, 0), "parts": [
 		[Vector3(0.36, 0.02, 0.25), Vector3(0, 0.01, 0.02), Color(0.2, 0.21, 0.24), 0.0],
@@ -50,7 +51,8 @@ var kind := ""
 var label := ""
 var provides := ""
 var sockets := 0
-var tag := ""           # free-form: which plot a sale sign or uplink pole belongs to
+var house := -1         # id of the house this belongs to, -1 for the garage's own fixtures
+var circuit := -1       # outlets and breakers: which breaker circuit they are on
 
 var _lamp: StandardMaterial3D
 

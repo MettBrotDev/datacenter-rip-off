@@ -5,6 +5,7 @@ extends CanvasLayer
 const UI = preload("res://scripts/ui.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const Shop = preload("res://scripts/shop.gd")
+const Offer = preload("res://scripts/offer.gd")
 const SETTINGS_MENU := "res://scripts/settings_menu.gd"
 
 var _prompt: Label
@@ -13,6 +14,7 @@ var _values: Dictionary = {}    # stat name -> Label
 var _toasts: VBoxContainer
 var _pause: Control
 var _shop: Control
+var _offer: Control
 var _settings: Control
 
 
@@ -91,6 +93,11 @@ func _ready() -> void:
 	_shop.hide()
 	_shop.closed.connect(_close_overlays)
 	add_child(_shop)
+	_offer = Offer.new()
+	_offer.world = get_parent()
+	_offer.hide()
+	_offer.closed.connect(_close_overlays)
+	add_child(_offer)
 	_build_pause()
 
 
@@ -125,6 +132,7 @@ func set_stats(money: float, tokens: float, watts: float, capacity: float, profi
 	_values["BALANCE"].text = UI.money(money)
 	_values["BALANCE"].add_theme_color_override("font_color", UI.GREEN if money >= 0.0 else UI.RED)
 	_shop.set_money(money)
+	_offer.refresh()
 
 
 func set_weather(index: int) -> void:
@@ -141,6 +149,15 @@ func toast(text: String) -> void:
 	if _toasts.get_child_count() > 5:
 		_toasts.get_child(0).queue_free()
 	p.create_tween().tween_callback(p.queue_free).set_delay(6.0)   # the tween dies with the panel
+
+
+func open_offer(house_id: int) -> void:
+	_offer.open(house_id)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func offer_reply(house_id: int, text: String, accepted: bool) -> void:
+	_offer.reply(house_id, text, accepted)
 
 
 func open_shop() -> void:
@@ -186,7 +203,7 @@ func _build_pause() -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("ui_cancel"):
-		if _shop.visible or _pause.visible:
+		if _shop.visible or _offer.visible or _pause.visible:
 			_close_overlays()
 		else:
 			_pause.show()
@@ -196,5 +213,6 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _close_overlays() -> void:
 	_shop.hide()
+	_offer.hide()
 	_pause.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED

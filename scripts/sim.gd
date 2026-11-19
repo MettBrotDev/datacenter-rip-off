@@ -2,11 +2,11 @@ extends RefCounted
 ## Host-only simulation of power, network and money. Runs twice a second.
 ## Rule: nothing is ever forbidden when you build it — this is where the consequences happen.
 ##
-## Power comes from "roots": the garage's wall circuit (one breaker) or any generator.
+## Power comes from "roots": a building's wall circuit (one breaker each) or any generator.
 ## Every device follows its cable chain to exactly one root; each root has its own limit.
+## Root keys: generators use their item id (> 0), circuit c uses -(c + 1).
 
 const Catalog = preload("res://scripts/catalog.gd")
-const GRID := -1            # key for the wall circuit in the per-root tables
 const OVERLOAD_STEPS := 3   # 1.5 s over the limit before something gives
 
 var money := Catalog.START_MONEY
@@ -14,16 +14,16 @@ var tokens := 0.0       # tokens per second being produced
 var watts := 0.0        # total load being served
 var capacity := 0.0     # total power currently available (grid + running generators)
 var profit := 0.0       # $ per second
-var tripped := false
-var weather := 0        # index into Catalog.WEATHER
+var tripped: Dictionary = {}   # circuit id -> true while its breaker is off
+var weather := 0       # index into Catalog.WEATHER
 var weather_left := 150.0   # seconds until it changes
 
 var _over: Dictionary = {}   # root key -> consecutive steps above its limit
 
 
-func reset_breaker() -> void:
-	tripped = false
-	_over.erase(GRID)
+func reset_breaker(circuit: int) -> void:
+	tripped.erase(circuit)
+	_over.erase(-(circuit + 1))
 
 
 ## Advances the simulation. Returns {item id: status bits}; appends messages for players to `events`.
@@ -56,14 +56,22 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if r != 0:
 			loads[r] = loads.get(r, 0.0) + it.def.get("watts", 0.0)
 
-	# limits: the breaker trips, generators stall
+	# limits: breakers trip (one per building we own), generators stall
 	var dead := {}
-	if not tripped and _overloaded(GRID, loads.get(GRID, 0.0), Catalog.BREAKER_WATTS, dt):
-		tripped = true
-		events.append("Breaker tripped! %d W on a %d W circuit" % [loads[GRID], Catalog.BREAKER_WATTS])
-	if tripped:
-		dead[GRID] = true
-	capacity = 0.0 if tripped else Catalog.BREAKER_WATTS
+	var grid_watts := 0.0
+	capacity = 0.0
+	var circuits: Dictionary = world.circuits()   # circuit id -> [limit in watts, where it is]
+	for c: int in circuits:
+		var key := -(c + 1)
+		var on_circuit: float = loads.get(key, 0.0)
+		if not tripped.has(c) and _overloaded(key, on_circuit, circuits[c][0], dt):
+			tripped[c] = true
+			events.append("Breaker tripped in %s! %d W on a %d W circuit" % [circuits[c][1], on_circuit, circuits[c][0]])
+		if tripped.has(c):
+			dead[key] = true
+		else:
+			capacity += circuits[c][0]
+			grid_watts += on_circuit
 	for it: Node3D in items.values():
 		if not it.def.has("gen"):
 			continue
@@ -129,7 +137,6 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 			tokens += it.def.get("tokens", 0.0)
 			status[it.id] = 3
 
-	var grid_watts: float = 0.0 if dead.has(GRID) else loads.get(GRID, 0.0)
 	profit = tokens * Catalog.TOKEN_PRICE - grid_watts * Catalog.POWER_PRICE   # generator power is paid in fuel
 	money += profit * dt
 	return status
@@ -166,7 +173,7 @@ func _power_root(it: Node3D, world: Node3D, live: Dictionary) -> int:
 			return 0
 		if to < 0:
 			var fixture: Node3D = world.fixtures.get(to)
-			return GRID if fixture != null and fixture.provides == "power" else 0
+			return -(fixture.circuit + 1) if fixture != null and fixture.provides == "power" else 0
 		var next: Node3D = world.items.get(to)
 		if next == null or next.provides != "power":
 			return 0
