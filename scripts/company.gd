@@ -1,24 +1,34 @@
 extends RefCounted
+## Models have four stats: smart(ness) 1-5 decides what they can make and
+## how good the code they write is; productivity is how much each token earns; speed is how fast
+## things get built; reliability is how often the result is not hallucinated nonsense.
 ## Host-only: the company. Tokens come in from the servers; this decides what they turn into.
 ## `state()` is what every peer sees (replicated twice a second as world.co); the action
-## methods are what players can ask for. Each returns "" on success or a reason it refused.
+## methods are what players can ask for. Each returns "" on success, a reason it refused, or
+## "$123" / "$-123" when the caller has to pay that amount in or out of the bank account.
 
 const Data = preload("res://scripts/company_data.gd")
 
 var tokens := 0.0           # stored, spendable
-var earned := 0.0           # lifetime $ made, decides the funding stage
+var earned := 0.0           # lifetime $ made (before costs), decides the funding stage
 var spot := 0.1             # $ per raw token right now
 var spot_trend := 0
-var jobs: Array = []        # being made: {id, kind, what, name, size, risk, left, total, tokens}
+var jobs: Array = []        # being made: {id, kind, what, name, size, risk, left, total, tokens, quality}
 var live: Array = []        # earning: {id, kind, what, name, size, peak, hype, age, earned, tokens, half_life}
-var model_gen := 0
-var training: Dictionary = {}   # {gen, left, total}
+var owned: Array = ["autocomplete"]   # model keys that are ours for good (bought or trained)
+var active := "autocomplete"          # the model in use; if not owned, it is rented by the minute
+var own: Dictionary = {}    # models we trained: key ("own1"...) -> the same fields a licensed model has
+var stack: Dictionary = {"data": 0, "arch": 0, "optim": 0, "evals": 0, "infra": 0}   # training code, level per component
+var coding: Dictionary = {}     # a component being written: {part, level, left, total, fail}
+var training: Dictionary = {}   # a model being trained: {plan, left, total}
 var users := 0.0            # platform
 var share := 0.0            # share of token production reserved for the platform, 0..1
 var campaign: Dictionary = {}   # {kind, left, total, gain}
 var served := 0.0           # tokens/s going to platform users right now
-var income := 0.0           # $ per second from everything, right now
+var income := 0.0           # $ per second coming in, before costs
+var costs: Dictionary = {}  # $ per minute going out, by reason
 var rate := 0.0             # tokens/s the servers make
+var overdue := false        # the account is below zero
 
 var _next_id := 1
 var _spot_left := 0.0
@@ -32,32 +42,59 @@ func level() -> int:
 func state() -> Dictionary:
 	var lv := level()
 	var next_at: float = Data.STAGES[mini(lv + 1, Data.STAGES.size() - 1)]["at"]
+	var m := info(active)
+	var total_costs := 0.0
+	for reason: String in costs:
+		total_costs += costs[reason]
+	var models := {}
+	for key: String in Data.MODELS:
+		models[key] = info(key)
+	for key: String in own:
+		models[key] = info(key)
+	for key: String in models:
+		models[key]["owned"] = key in owned
 	return {
 		"tokens": tokens, "storage": Data.storage(lv), "rate": rate,
 		"spot": spot, "spot_trend": spot_trend,
 		"level": lv, "stage": Data.STAGES[lv]["name"], "earned": earned, "next_at": next_at,
 		"slots": Data.slots(lv),
-		"model": {"gen": model_gen, "name": _model_name(model_gen),
-			"quality": Data.model_quality(model_gen), "speed": Data.model_speed(model_gen)},
+		"models": models, "active": active, "owned": owned,
+		"stack": stack, "coding": coding, "plan": Data.planned_model(stack),
+		"model": {"key": active, "name": m["name"], "smart": m["smart"], "productivity": m["productivity"], "speed": m["speed"],
+			"reliability": m["reliability"], "only": m.get("only", ""), "rented": active not in owned, "rent": m["rent"]},
 		"training": training, "jobs": jobs, "live": live,
-		"platform": {"open": model_gen > 0, "users": int(users), "share": share, "served": served,
-			"want": users * Data.USER_APPETITE, "price": Data.PLATFORM_PRICE * Data.model_quality(model_gen),
-			"campaign": campaign},
-		"income": income * 60.0,
+		"platform": {"open": m["smart"] >= Data.PLATFORM_TIER, "users": int(users), "share": share, "served": served,
+			"want": users * Data.USER_APPETITE, "price": Data.PLATFORM_PRICE * m["productivity"], "campaign": campaign},
+		"income": income * 60.0, "costs": costs, "upkeep": total_costs, "net": income * 60.0 - total_costs,
+		"overdue": overdue,
 	}
 
 
-## Advances the company. `produced` = tokens/s from the servers. Returns the $ earned in `dt`.
-func tick(dt: float, produced: float, events: Array) -> float:
+## Advances the company. `produced` = tokens/s from the servers, `houses` = how many houses we
+## own, `rent_due` = whether we still rent the garage. Returns the change to the bank account.
+func tick(dt: float, produced: float, money: float, houses: int, rent_due: bool, events: Array) -> float:
 	rate = produced
-	var money := 0.0
+	var m := info(active)
+	var gross := 0.0
+
+	# out of money: the card for the rented model bounces
+	if money < 0.0 and not overdue:
+		overdue = true
+		events.append("The account is below zero. Your landlady has unplugged the internet until you pay up.")
+	elif money >= 0.0 and overdue:
+		overdue = false
+		events.append("Debts paid. The internet is back.")
+	if overdue and active not in owned:
+		events.append("The payment for %s bounced. Back to %s." % [m["name"], info(_best_owned())["name"]])
+		active = _best_owned()
+		m = info(active)
 
 	# the platform takes its share of fresh tokens first; the rest goes into storage
 	served = 0.0
-	if model_gen > 0 and users > 0.0:
+	if m["smart"] >= Data.PLATFORM_TIER and users > 0.0:
 		var wanted: float = users * Data.USER_APPETITE
 		served = minf(wanted, produced * share)
-		money += served * Data.PLATFORM_PRICE * Data.model_quality(model_gen) * dt
+		gross += served * Data.PLATFORM_PRICE * m["productivity"] * dt
 		if served < wanted * 0.8 and dt > 0.0:   # users who get error pages leave
 			users = maxf(0.0, users - users * 0.01 * dt)
 	tokens = minf(Data.storage(level()), tokens + (produced - served) * dt)
@@ -68,17 +105,34 @@ func tick(dt: float, produced: float, events: Array) -> float:
 		if job["left"] <= 0.0:
 			jobs.erase(job)
 			_launch(job, events)
+	if not coding.is_empty():
+		coding["left"] -= dt
+		if coding["left"] <= 0.0:
+			var part: String = coding["part"]
+			var label: String = Data.COMPONENTS[part]["name"].to_lower()
+			if randf() < coding["fail"]:
+				events.append("The new %s does not run: it imports a library that does not exist. Tokens wasted." % label)
+			else:
+				stack[part] = coding["level"]
+				events.append("The %s is now level %d code." % [label, coding["level"]])
+			coding = {}
 	if not training.is_empty():
 		training["left"] -= dt
 		if training["left"] <= 0.0:
-			var gen: int = training["gen"]
+			var plan: Dictionary = training["plan"]
 			training = {}
-			if randf() < 0.15:
-				tokens = minf(Data.storage(level()), tokens + Data.model_cost(gen) * 0.5)
-				events.append("Training %s failed: the loss went to NaN. Half the tokens were salvaged." % _model_name(gen))
+			if randf() < plan["fail"]:
+				tokens = minf(Data.storage(level()), tokens + plan["tokens"] * 0.5)
+				events.append("The training run failed: the loss went to NaN. Half the tokens were salvaged.")
 			else:
-				model_gen = gen
-				events.append("%s is trained! Everything you launch now earns x%.2f." % [_model_name(gen), Data.model_quality(gen)])
+				var key := "%s%d" % [Data.OWN_PREFIX, own.size() + 1]
+				own[key] = {"name": "RipOffLM v%d" % (own.size() + 1), "blurb": "Ours. Trained on everything, licensed from nobody.",
+					"smart": plan["smart"], "productivity": plan["productivity"], "speed": plan["speed"], "reliability": plan["reliability"],
+					"rent": 0, "price": 0, "own": true}
+				owned.append(key)
+				active = key
+				events.append("%s is trained and in use: smartness %d, productivity x%.2f. No licence fees, ever." % [
+					own[key]["name"], plan["smart"], plan["productivity"]])
 
 	# things that are live: income follows hype, hype fades
 	for item: Dictionary in live:
@@ -86,7 +140,7 @@ func tick(dt: float, produced: float, events: Array) -> float:
 		item["hype"] = pow(0.5, item["age"] / item["half_life"])
 		var per_second: float = item["peak"] * item["hype"] / 60.0
 		item["earned"] += per_second * dt
-		money += per_second * dt
+		gross += per_second * dt
 
 	# marketing
 	if not campaign.is_empty():
@@ -100,11 +154,26 @@ func tick(dt: float, produced: float, events: Array) -> float:
 	_market(dt)
 	_random_event(dt, events)
 	var before := level()
-	earned += money
-	income = money / dt if dt > 0.0 else income
+	earned += gross
+	if dt > 0.0:
+		income = gross / dt
 	if level() > before:
 		events.append("Funding secured: you are now a %s company. More slots, more storage, new things to build." % Data.STAGES[level()]["name"])
-	return money
+
+	# what it all costs, $ per minute
+	costs = {}
+	if rent_due:
+		costs["Garage rent"] = Data.GARAGE_RENT
+	if houses > 0:
+		costs["Property tax"] = Data.PROPERTY_TAX * houses
+	if active not in owned:
+		costs["%s licence" % m["name"]] = float(m["rent"])
+	if income > 0.0:
+		costs["Taxes and lawyers"] = income * 60.0 * Data.INCOME_TAX
+	var out := 0.0
+	for reason: String in costs:
+		out += costs[reason]
+	return gross - out / 60.0 * dt
 
 
 # --- what players can ask for -------------------------------------------------------
@@ -119,7 +188,7 @@ func sell(amount: float, events: Array) -> String:
 	var got := amount * spot
 	earned += got
 	events.append("Sold %d raw tokens for $%d. The market thanks you for your desperation." % [amount, got])
-	return "$%d" % got   # special: the caller pays this out
+	return "$%d" % got
 
 
 func start(kind: String, what: String, size: int, risk: int) -> String:
@@ -128,6 +197,9 @@ func start(kind: String, what: String, size: int, risk: int) -> String:
 		return "No such thing"
 	if kind == "slop":
 		risk = 0
+	var refusal := Data.can_make(info(active), kind, what)
+	if refusal != "":
+		return refusal
 	if def["level"] > level():
 		return "Needs %s" % Data.STAGES[def["level"]]["name"]
 	if live.size() + jobs.size() >= Data.slots(level()):
@@ -136,9 +208,10 @@ func start(kind: String, what: String, size: int, risk: int) -> String:
 	if cost > tokens:
 		return "Needs %d tokens" % cost
 	tokens -= cost
-	var seconds: float = def["time"] * Data.SIZES[size]["time"] * Data.RISKS[risk]["time"] / Data.model_speed(model_gen)
+	var m := info(active)
+	var seconds: float = def["time"] * Data.SIZES[size]["time"] * Data.RISKS[risk]["time"] / m["speed"]
 	jobs.append({"id": _id(), "kind": kind, "what": what, "name": _name(kind, def), "size": size, "risk": risk,
-		"left": seconds, "total": seconds, "tokens": cost})
+		"left": seconds, "total": seconds, "tokens": cost, "productivity": m["productivity"], "reliability": m["reliability"]})
 	return ""
 
 
@@ -199,26 +272,79 @@ func retire(id: int) -> String:
 	return "No such product"
 
 
-func train() -> String:
-	var gen := model_gen + 1
-	if not training.is_empty():
-		return "Already training"
-	if Data.model_cost(gen) > tokens:
-		return "Needs %d tokens" % Data.model_cost(gen)
-	if Data.model_cost(gen) > Data.storage(level()):
-		return "Needs more storage than a %s company has" % Data.STAGES[level()]["name"]
-	tokens -= Data.model_cost(gen)
-	var seconds := Data.model_time(gen)
-	training = {"gen": gen, "left": seconds, "total": seconds}
+## Everything about one model, licensed or our own. {} if there is no such model.
+func info(key: String) -> Dictionary:
+	if own.has(key):
+		return own[key].duplicate()
+	return Data.licensed(key) if Data.MODELS.has(key) else {}
+
+
+## Switch to another model. One you do not own is rented by the minute from now on.
+func use_model(key: String, money: float) -> String:
+	if info(key).is_empty():
+		return "No such model"
+	if key not in owned and money <= 0.0:
+		return "No money, no licence"
+	active = key
 	return ""
 
 
-## Marketing costs money, not tokens: returns "$-600" style for the caller to charge.
+## Buy a model's weights outright. It becomes the model in use.
+func buy_model(key: String, money: float) -> String:
+	if not Data.MODELS.has(key):
+		return "No such model"
+	if key in owned:
+		return "Already ours"
+	var price: float = Data.MODELS[key]["price"]
+	if price > money:
+		return "Needs $%d" % price
+	owned.append(key)
+	active = key
+	return "$-%d" % price
+
+
+## Have the model in use write the next level of one training-stack component.
+func code(part: String) -> String:
+	if not Data.COMPONENTS.has(part):
+		return "No such component"
+	if not coding.is_empty():
+		return "The model is already writing something"
+	var m := info(active)
+	var next: int = stack[part] + 1
+	if next > Data.MAX_CODE:
+		return "That is as good as code gets"
+	if next > Data.code_cap(m):
+		return "%s is not smart enough to write level %d code" % [m["name"], next]
+	if Data.code_cost(next) > tokens:
+		return "Needs %d tokens" % Data.code_cost(next)
+	tokens -= Data.code_cost(next)
+	var seconds: float = Data.code_time(next) / m["speed"]
+	coding = {"part": part, "level": next, "left": seconds, "total": seconds, "fail": Data.code_fail(m)}
+	return ""
+
+
+## Train a model with the stack as it is now.
+func train() -> String:
+	var plan := Data.planned_model(stack)
+	if not plan["ready"]:
+		return "Every part of the training stack has to exist first"
+	if not training.is_empty():
+		return "Already training"
+	if plan["tokens"] > Data.storage(level()):
+		return "Needs more token storage than a %s company has" % Data.STAGES[level()]["name"]
+	if plan["tokens"] > tokens:
+		return "Needs %d tokens" % plan["tokens"]
+	tokens -= plan["tokens"]
+	training = {"plan": plan, "left": plan["time"], "total": plan["time"]}
+	return ""
+
+
+## Marketing costs money, not tokens.
 func advertise(kind: String, money: float) -> String:
 	if not Data.CAMPAIGNS.has(kind):
 		return "No such campaign"
-	if model_gen == 0:
-		return "Train a model first: there is nothing to sell yet"
+	if info(active)["smart"] < Data.PLATFORM_TIER:
+		return "The platform needs a tier %d model: nobody pays for what you have now" % Data.PLATFORM_TIER
 	if not campaign.is_empty():
 		return "A campaign is already running"
 	var def: Dictionary = Data.CAMPAIGNS[kind]
@@ -236,22 +362,25 @@ func set_share(value: float) -> String:
 
 ## Test aid: a company a few hours in, so every part of the menu has something to show.
 func demo() -> void:
-	earned = 60000.0
-	tokens = 90000.0
-	model_gen = 2
+	earned = 600000.0
+	tokens = 700000.0
+	owned = ["autocomplete", "llama", "mistrial"]
+	active = "gptish"
 	users = 5200.0
 	share = 0.3
 	live = [
 		{"id": _id(), "kind": "slop", "what": "recipes", "name": "Recipe site", "size": 0, "peak": 80.0, "hype": 0.5, "age": 300.0,
-			"earned": 310.0, "tokens": 900.0, "half_life": 300.0},
-		{"id": _id(), "kind": "product", "what": "wrapper", "name": "ChatRipOff", "size": 1, "peak": 320.0, "hype": 0.3, "age": 1560.0,
-			"earned": 5200.0, "tokens": 8750.0, "half_life": 900.0},
-		{"id": _id(), "kind": "product", "what": "copilot", "name": "CodeSlopper", "size": 0, "peak": 840.0, "hype": 0.9, "age": 200.0,
-			"earned": 2600.0, "tokens": 26000.0, "half_life": 1400.0},
+			"earned": 310.0, "tokens": 1500.0, "half_life": 300.0},
+		{"id": _id(), "kind": "slop", "what": "lofi", "name": "Lo-fi beats to train to", "size": 1, "peak": 6600.0, "hype": 0.8, "age": 120.0,
+			"earned": 12400.0, "tokens": 105000.0, "half_life": 380.0},
+		{"id": _id(), "kind": "product", "what": "wrapper", "name": "ChatRipOff (chatbot wrapper)", "size": 0, "peak": 7400.0, "hype": 0.3, "age": 1560.0,
+			"earned": 152000.0, "tokens": 120000.0, "half_life": 900.0},
 	]
-	jobs = [{"id": _id(), "kind": "product", "what": "girlfriend", "name": "Waifu Enterprise", "size": 2, "risk": 1,
-		"left": 70.0, "total": 165.0, "tokens": 168000.0}]
-	training = {"gen": 3, "left": 80.0, "total": 135.0}
+	jobs = [{"id": _id(), "kind": "product", "what": "resume", "name": "SynergyPilot (resume optimiser)", "size": 0, "risk": 1,
+		"left": 50.0, "total": 84.0, "tokens": 250000.0, "productivity": 1.0, "reliability": 0.8}]
+	stack = {"data": 2, "arch": 2, "optim": 1, "evals": 2, "infra": 1}
+	coding = {"part": "optim", "level": 2, "left": 35.0, "total": 60.0, "fail": 0.2}
+	training = {"plan": Data.planned_model(stack), "left": 130.0, "total": 260.0}
 	campaign = {"kind": "influencer", "left": 25.0, "total": 40.0, "gain": 2400.0}
 
 
@@ -261,11 +390,26 @@ func _launch(job: Dictionary, events: Array) -> void:
 	var def: Dictionary = Data.thing(job["kind"], job["what"])
 	var risk: Dictionary = Data.RISKS[job["risk"]]
 	var luck := randf_range(risk["low"], risk["high"])
-	var peak: float = def["income"] * Data.SIZES[job["size"]]["income"] * Data.model_quality(model_gen) * luck
+	var botched: bool = randf() > job["reliability"]
+	if botched:
+		luck *= 0.5
+	var peak: float = def["income"] * Data.SIZES[job["size"]]["income"] * job["productivity"] * luck
 	live.append({"id": job["id"], "kind": job["kind"], "what": job["what"], "name": job["name"], "size": job["size"],
 		"peak": peak, "hype": 1.0, "age": 0.0, "earned": 0.0, "tokens": job["tokens"], "half_life": float(def["half_life"])})
 	var verdict := "a hit" if luck > 1.4 else ("a flop" if luck < 0.6 else "live")
-	events.append("%s is %s: $%d a minute, for now." % [job["name"], verdict, peak])
+	events.append("%s is %s: $%d a minute, for now.%s" % [job["name"], verdict, peak,
+		" Half of it is hallucinated; the model is not reliable enough." if botched else ""])
+
+
+## The best model we actually own: highest tier, then highest quality.
+func _best_owned() -> String:
+	var best := "autocomplete"
+	for key: String in owned:
+		var a := info(key)
+		var b := info(best)
+		if a["smart"] > b["smart"] or (a["smart"] == b["smart"] and a["productivity"] > b["productivity"]):
+			best = key
+	return best
 
 
 func _market(dt: float) -> void:
@@ -299,9 +443,7 @@ func _random_event(dt: float, events: Array) -> void:
 			item["age"] += item["half_life"]
 			events.append("A competitor cloned %s over the weekend. Half its hype is gone." % item["name"])
 		4:
-			var fine: float = minf(item["earned"] * 0.3, 20000.0)
-			item["earned"] -= fine
-			earned -= fine
+			var fine: float = minf(item["earned"] * 0.3, item["peak"] * 5.0)
 			events.append("Lawyers found %s. The settlement cost $%d." % [item["name"], fine])
 			events.append("$-%d" % fine)   # special: the caller charges this
 
@@ -309,10 +451,6 @@ func _random_event(dt: float, events: Array) -> void:
 func _id() -> int:
 	_next_id += 1
 	return _next_id - 1
-
-
-func _model_name(gen: int) -> String:
-	return "no model of your own" if gen == 0 else "RipOffLM Gen %d" % gen
 
 
 ## Products get a startup name; slop is just called what it is.

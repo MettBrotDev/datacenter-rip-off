@@ -333,6 +333,7 @@ func request_fainted() -> void:
 ##   "sell" [tokens, 0 = all]        "start" [kind "slop"|"product", key, size 0-2, risk 0-2]
 ##   "update" [live id]   "retire" [live id]   "cancel" [job id]   "rush" [job id]
 ##   "train" []           "advertise" [campaign key]              "share" [0..1]
+##   "use" [model key]    "buy" [model key]    "code" [training stack component key]
 ## A refusal comes back to the asker as a notice (hud.toast).
 func request_company(action: String, args: Array = []) -> void:
 	_to_host(&"_h_company", [action, args])
@@ -717,6 +718,16 @@ func _h_company(action: String, args: Array) -> void:
 			result = _company.train()
 			if result == "":
 				events.append("%s started training a new model. Do not unplug anything." % name_of(peer))
+		["use", 1]:
+			result = _company.use_model(str(args[0]), _sim.money)
+			if result == "":
+				events.append("%s switched the company to %s" % [name_of(peer), _company.info(_company.active)["name"]])
+		["buy", 1]:
+			result = _company.buy_model(str(args[0]), _sim.money)
+			if result.begins_with("$"):
+				events.append("%s bought %s" % [name_of(peer), _company.info(str(args[0]))["name"]])
+		["code", 1]:
+			result = _company.code(str(args[0]))
 		["advertise", 1]:
 			result = _company.advertise(str(args[0]), _sim.money)
 		["share", 1]:
@@ -946,7 +957,11 @@ func _sim_step(dt: float) -> void:
 	_drop_unsupported()
 	var events: Array = []
 	var status := _sim.step(self, dt, events)
-	_sim.money += _company.tick(dt, _sim.tokens, events)
+	var ours := 0
+	for h: House in houses.values():
+		if h.state != House.NEIGHBOUR:
+			ours += 1
+	_sim.money += _company.tick(dt, _sim.tokens, _sim.money, ours, houses[0].state == House.NEIGHBOUR, events)
 	_sim.profit = _company.income
 	_announce(events)
 	_cast(&"_r_company", [_company.state()])
@@ -1127,6 +1142,7 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _r_company(state: Dictionary) -> void:
 	co = state
+	fixtures[-3].provides = "" if co["overdue"] else "net"   # no money, no internet in the garage
 	hud.company_changed()
 
 

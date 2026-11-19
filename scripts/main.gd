@@ -341,27 +341,47 @@ func _selftest() -> void:
 	me._feel_heat(600.0)
 	print("CHECK 10 min at 60 °C in the suit: exposure %d%%, wearing=%s" % [me.exposure * 100.0, world.worn_by(1) != null])
 
-	# 15a. the company: tokens are not money. Sell some raw, make slop, build a product, train a model.
+	# 15a. the company: tokens are not money. Sell some raw, make slop, then the model ladder.
 	var company: RefCounted = world._company
-	company.tokens = 30000.0
+	company.earned = 30000.0     # a Seed-round company: 180k tokens of storage
+	company.tokens = 170000.0
 	var cash: float = sim.money
 	world.request_company("sell", [1000])
 	print("CHECK sold 1000 raw tokens at $%.2f each: got $%d" % [company.spot, sim.money - cash])
 	world.request_company("start", ["slop", "seo", 0, 0])
-	world.request_company("start", ["product", "wrapper", 1, 0])
-	world.request_company("train", [])
-	print("CHECK started slop, a product and training: %d tokens left, %d in the works, training gen %s" % [
-		company.tokens, company.jobs.size(), company.training.get("gen", "-")])
-	world.request_company("start", ["product", "agi", 0, 0])   # refused: wrong stage
-	await _run(200.0)
-	print("CHECK 200 s later: live=%s model gen %d, income $%d/min, stage %s" % [
+	print("CHECK a product with the starter model: %s" % company.start("product", "wrapper", 0, 0))
+	print("CHECK training with no code written: %s" % company.train())
+	world.request_company("use", ["llama"])   # rented by the minute from here on
+	world._sim_step(0.5)
+	print("CHECK renting %s; running costs per minute: %s" % [world.co["model"]["name"], str(world.co["costs"])])
+	#      the model writes the five parts of the training stack (each attempt can fail)
+	for part: String in company.stack:
+		for attempt in 6:
+			if company.stack[part] < 1:
+				world.request_company("code", [part])
+				await _run(32.0)
+	print("CHECK training stack after the model wrote it: %s" % str(company.stack))
+	print("CHECK level 2 code with a smartness-1 model: %s" % company.code("data"))
+	var plan: Dictionary = world.co["plan"]
+	print("CHECK the model this stack would train: smartness %d, productivity x%.2f, reliability %d%%, %d tokens" % [
+		plan["smart"], plan["productivity"], plan["reliability"] * 100.0, plan["tokens"]])
+	for attempt in 4:
+		if company.own.is_empty():
+			company.tokens = 170000.0
+			world.request_company("train", [])
+			await _run(plan["time"] + 2.0)
+	print("CHECK after training: using %s, owned %s, costs %s" % [world.co["model"]["name"], str(company.owned), str(world.co["costs"])])
+	print("CHECK live now: %s, stage %s" % [
 		str(company.live.map(func(item: Dictionary) -> String: return "%s $%d/min" % [item["name"], item["peak"] * item["hype"]])),
-		company.model_gen, company.income * 60.0, world.co["stage"]])
-	world.request_company("share", [0.5])
-	world.request_company("advertise", ["ads"])
-	await _run(60.0)
-	print("CHECK platform: users=%d served=%.1f tok/s share=%d%%" % [company.users, company.served, company.share * 100.0])
-	world.request_company("share", [0.0])
+		world.co["stage"]])
+	#      going broke: the landlady pulls the plug
+	var saved: float = sim.money
+	sim.money = -50.0
+	world._sim_step(0.5)
+	print("CHECK account below zero: overdue=%s garage internet=%s" % [world.co["overdue"], world.fixtures[-3].provides != ""])
+	sim.money = saved
+	world._sim_step(0.5)
+	print("CHECK debts paid: overdue=%s garage internet=%s" % [world.co["overdue"], world.fixtures[-3].provides != ""])
 
 	# 15. sensors feed the ops board: nothing is listed until they are installed
 	print("CHECK board with no sensors: %s" % str(world.board.readings(world)))
