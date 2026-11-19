@@ -36,6 +36,8 @@ Rule of thumb for chaos: funny and recoverable, never tedious.
 - Items placed with E on a surface are pinned (no physics) until grabbed or their support disappears.
 - Outside: `scripts/outside.gd` is pure scenery. Plots (`Catalog.PLOTS`) are bought at their sale sign;
   each has a concrete pad and a fibre pole that works once owned. Plots have no wall power.
+- Weather (`Catalog.WEATHER`, decided in `sim.gd`, drawn by `weather.gd`) scales solar output.
+- Planned features and open design questions live in `ROADMAP.md`; known problems in `KNOWN_ISSUES.md`.
 - Collision layers: 1 world, 2 loose items, 4 mounted items (ray only), 8 players, 16 big items.
 
 ## Testing (always do this after changes)

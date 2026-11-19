@@ -10,7 +10,9 @@ Things that are wrong or missing on purpose-for-now. Fix when their milestone co
 - No cooling, heat or fire yet.
 - Two players can stand inside each other.
 - You can build on a plot you do not own; only its fibre pole is locked.
-- Generators have no downsides yet (no noise, fumes or fire), and there is no day/night for solar.
+- Generators have no downsides yet (no noise, fumes or fire). There is weather but no day/night.
+- Rain is only drawn while you stand outdoors: from inside the garage you see none through the open door.
+- Rain does nothing to hardware left outside.
 - A pedalling player is glued to the bike but has no sitting pose.
 
 ## Untested

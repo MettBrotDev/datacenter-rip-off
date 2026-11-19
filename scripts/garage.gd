@@ -9,6 +9,10 @@ const DOOR_Y := 1.25
 
 var fixtures: Dictionary = {}   # fixture id -> Fixture
 
+var sky_mat: ProceduralSkyMaterial   # the weather changes these three
+var sun: DirectionalLight3D
+var env: Environment
+
 var _body: StaticBody3D
 var _door: StaticBody3D
 var _door_shape: CollisionShape3D
@@ -109,9 +113,9 @@ func _fixture(id: int, kind: String, pos: Vector3, yaw: float) -> void:
 
 
 func _environment() -> void:
-	var env := Environment.new()
+	env = Environment.new()
 	_env = env
-	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.22, 0.46, 0.9)
 	sky_mat.sky_horizon_color = Color(0.72, 0.84, 0.96)
 	sky_mat.ground_horizon_color = Color(0.72, 0.84, 0.96)
@@ -122,7 +126,7 @@ func _environment() -> void:
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.5
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-48, -35, 0)
 	sun.light_color = Color(1.0, 0.96, 0.88)
 	sun.light_energy = 1.3

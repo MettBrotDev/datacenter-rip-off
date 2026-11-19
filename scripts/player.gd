@@ -354,8 +354,11 @@ func _generator_actions(t: Node3D, acts: Array) -> void:
 			acts.append(["", "Fuel %d%%   %s" % [ceilf(t.fuel * 100.0), output] if t.fuel > 0.0
 					else "Out of fuel: bring a jerry can", Callable()])
 		"solar":
-			acts.append(["", "Solar: %s" % output if _world.is_outdoors(t.global_position)
-					else "Solar panels need to be outdoors", Callable()])
+			var state: Dictionary = Catalog.WEATHER[_world.weather]
+			if not _world.is_outdoors(t.global_position):
+				acts.append(["", "Solar panels need to be outdoors", Callable()])
+			else:
+				acts.append(["", "%s: %d / %d W" % [state["name"], t.load, gen["watts"] * state["solar"]], Callable()])
 
 
 func _set_cable(cable: Dictionary) -> void:

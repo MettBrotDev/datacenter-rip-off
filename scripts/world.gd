@@ -17,6 +17,7 @@ const UI = preload("res://scripts/ui.gd")
 const SPAWNS: Array[Vector3] = [Vector3(-1.5, 0, 2), Vector3(0, 0, 2.4), Vector3(1.5, 0, 2), Vector3(0, 0, 1)]
 const DELIVERY := Vector3(2.6, 1.0, 1.8)   # next to the roller door
 const SIM_STEP := 0.5
+const Weather = preload("res://scripts/weather.gd")
 const OUTSIDE := "res://scripts/outside.gd"   # scenery around the garage
 
 var items: Dictionary = {}      # item id (> 0) -> Item
@@ -32,7 +33,10 @@ var door_open := false
 var capacity := 0.0             # watts available right now (grid + running generators)
 var owned: Dictionary = {}      # plot key -> true once bought
 
+var weather := 0                # index into Catalog.WEATHER
+
 var _garage: Garage
+var _weather: Weather
 var _players: Node3D
 var _items: Node3D
 var _sim: Sim                   # host only
@@ -48,6 +52,9 @@ func _ready() -> void:
 	if ResourceLoader.exists(OUTSIDE):
 		add_child(load(OUTSIDE).new())
 	_build_plots()
+	_weather = Weather.new()
+	_weather.setup(_garage.env, _garage.sky_mat, _garage.sun)
+	add_child(_weather)
 	_players = Node3D.new()
 	_players.name = "Players"
 	add_child(_players)
@@ -115,8 +122,9 @@ func can_attach(child: Item, par: Item) -> bool:
 
 
 func debug_dump() -> String:
-	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f/%.0f tripped=%s door=%s owned=%s" % [
-		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, capacity, tripped, door_open, owned.keys()]
+	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f/%.0f tripped=%s door=%s owned=%s weather=%s" % [
+		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, capacity, tripped, door_open, owned.keys(),
+		Catalog.WEATHER[weather]["name"]]
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
 	for it: Item in items.values():
@@ -511,7 +519,7 @@ func _sim_step(dt: float) -> void:
 	for it: Item in items.values():
 		if it.def.has("gen"):
 			gens[it.id] = [it.running, it.fuel, it.rider, it.load]
-	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped], status, gens])
+	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped, _sim.weather], status, gens])
 
 
 ## A pinned item whose support was taken away (the crate under it got picked up...) falls.
@@ -606,6 +614,9 @@ func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
 	watts = company[2]
 	capacity = company[3]
 	tripped = company[5]
+	weather = company[6]
+	_weather.set_weather(weather)
+	hud.set_weather(weather)
 	for id: int in status:
 		var it: Item = items.get(id)
 		if it:

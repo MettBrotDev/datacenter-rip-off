@@ -8,10 +8,11 @@ extends Node
 ##   --yaw=DEG              initial facing of the local player
 ##   --pos=X,Y,Z            initial position of the local player
 ##   --money=N              host: set the company balance
+##   --weather=N            host: force the weather (0 sunny, 1 cloudy, 2 rain) and keep it
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
-##   --shot=PATH            save a screenshot after ~2.5 s, then quit
+##   --shot=PATH            save a screenshot after --wait=SECONDS (default 2.5), then quit
 
 const World = preload("res://scripts/world.gd")
 const Menu = preload("res://scripts/menu.gd")
@@ -80,6 +81,9 @@ func _handle_args() -> void:
 		Net.join(args["join"] if args["join"] != "" else "127.0.0.1")
 	if args.has("money") and world:
 		world._sim.money = float(args["money"])
+	if args.has("weather") and world:
+		world._sim.weather = int(args["weather"])
+		world._sim.weather_left = 1e9
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("selftest"):
@@ -89,7 +93,7 @@ func _handle_args() -> void:
 		print(world.debug_dump() if world else "PROBE no world")
 		get_tree().quit()
 	elif args.has("shot"):
-		await get_tree().create_timer(2.5).timeout
+		await get_tree().create_timer(float(args.get("wait", "2.5"))).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(args["shot"])
 		get_tree().quit()
@@ -149,3 +153,12 @@ func _selftest() -> void:
 	await get_tree().create_timer(1.0).timeout
 	world.request_link(strip.id, "power", 0)
 	world.request_link(strip.id, "power", by_kind["gen_bike"].id)
+	# solar: carry a panel out onto the lawn; what it adds depends on the weather
+	world.request_buy("gen_solar")
+	await get_tree().create_timer(0.3).timeout
+	for it: Node3D in world.items.values():
+		if it.kind == "gen_solar":
+			world.request_use(by_kind["gen_bike"].id)   # hop off if still on
+			me.position = Vector3(6, 0, 3)
+			world.request_grab(it.id)
+			world.request_place(Transform3D(Basis(), Vector3(8, 0.05, 2)))

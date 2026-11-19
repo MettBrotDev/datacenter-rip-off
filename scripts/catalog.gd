@@ -21,6 +21,13 @@ const MAX_CABLE := 7.0           # metres before a cable gets yanked out
 const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack",
 	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "crate"]
 
+## Weather states. `solar` scales what a solar panel can deliver.
+const WEATHER: Array[Dictionary] = [
+	{"name": "Sunny", "solar": 1.0, "news": "The sun is out: solar panels at full power"},
+	{"name": "Cloudy", "solar": 0.4, "news": "Clouds are rolling in: solar panels down to 40%"},
+	{"name": "Rain", "solar": 0.0, "news": "It's raining: solar panels produce nothing"},
+]
+
 ## Land you can buy by walking up to its sale sign. `sign` and `pole` are world positions;
 ## the fibre pole on a plot only works once the plot is owned. No wall power out there.
 const PLOTS := {

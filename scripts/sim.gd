@@ -15,6 +15,8 @@ var watts := 0.0        # total load being served
 var capacity := 0.0     # total power currently available (grid + running generators)
 var profit := 0.0       # $ per second
 var tripped := false
+var weather := 0        # index into Catalog.WEATHER
+var weather_left := 150.0   # seconds until it changes
 
 var _over: Dictionary = {}   # root key -> consecutive steps above its limit
 
@@ -27,6 +29,14 @@ func reset_breaker() -> void:
 ## Advances the simulation. Returns {item id: status bits}; appends messages for players to `events`.
 func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 	var items: Dictionary = world.items
+	weather_left -= dt
+	if weather_left <= 0.0:
+		var roll := randf()
+		var next := 0 if roll < 0.5 else (1 if roll < 0.8 else 2)
+		weather = next if next != weather else (weather + 1) % Catalog.WEATHER.size()
+		weather_left = randf_range(90.0, 240.0)
+		events.append(Catalog.WEATHER[weather]["news"])
+	var sun: float = Catalog.WEATHER[weather]["solar"]
 
 	# which generators are producing right now
 	var live := {}
@@ -58,12 +68,19 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 		if not it.def.has("gen"):
 			continue
 		var gen: Dictionary = it.def["gen"]
+		var limit: float = gen["watts"] * (sun if gen["kind"] == "solar" else 1.0)
 		var load: float = loads.get(it.id, 0.0)
 		it.load = load
 		if not live[it.id]:
 			_over.erase(it.id)
 			continue
-		if _overloaded(it.id, load, gen["watts"], dt):
+		if gen["kind"] == "solar":   # a panel just browns out for as long as it is overloaded
+			if load > limit:
+				dead[it.id] = true
+			else:
+				capacity += limit
+			continue
+		if _overloaded(it.id, load, limit, dt):
 			dead[it.id] = true
 			_over.erase(it.id)
 			if gen["kind"] == "fuel":
@@ -73,10 +90,7 @@ func step(world: Node3D, dt: float, events: Array) -> Dictionary:
 				events.append("%s could not keep up with %d W and fell off the bike" % [world.name_of(it.rider), load])
 				it.rider = 0
 			continue
-		if load > gen["watts"] and gen["kind"] == "solar":
-			dead[it.id] = true   # a panel just browns out for as long as it is overloaded
-			continue
-		capacity += gen["watts"]
+		capacity += limit
 		if gen["kind"] == "fuel":
 			it.fuel = maxf(0.0, it.fuel - dt / gen["burn"] * (0.25 + 0.75 * load / gen["watts"]))
 			if it.fuel <= 0.0:
@@ -137,7 +151,8 @@ func _generating(it: Node3D, world: Node3D) -> bool:
 		"fuel":
 			return it.running and it.fuel > 0.0
 		"solar":
-			return it.holder == 0 and world.is_outdoors(it.global_position)
+			return it.holder == 0 and world.is_outdoors(it.global_position) \
+					and Catalog.WEATHER[weather]["solar"] > 0.0
 	return false
 
 

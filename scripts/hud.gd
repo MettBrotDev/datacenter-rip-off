@@ -64,7 +64,7 @@ func _ready() -> void:
 	bar.alignment = BoxContainer.ALIGNMENT_END
 	bar.add_theme_constant_override("separation", 8)
 	right.add_child(bar)
-	for stat: String in ["COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
+	for stat: String in ["WEATHER", "COMPUTE", "POWER", "NET PROFIT", "BALANCE"]:
 		var tile := UI.panel(10)
 		tile.custom_minimum_size.x = 150
 		bar.add_child(tile)
@@ -125,6 +125,12 @@ func set_stats(money: float, tokens: float, watts: float, capacity: float, profi
 	_values["BALANCE"].text = UI.money(money)
 	_values["BALANCE"].add_theme_color_override("font_color", UI.GREEN if money >= 0.0 else UI.RED)
 	_shop.set_money(money)
+
+
+func set_weather(index: int) -> void:
+	var state: Dictionary = Catalog.WEATHER[index]
+	_values["WEATHER"].text = state["name"]
+	_values["WEATHER"].add_theme_color_override("font_color", UI.TEXT if state["solar"] > 0.0 else UI.DIM)
 
 
 func toast(text: String) -> void:
