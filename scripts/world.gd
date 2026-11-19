@@ -29,6 +29,8 @@ var tokens := 0.0
 var watts := 0.0
 var tripped := false
 var door_open := false
+var capacity := 0.0             # watts available right now (grid + running generators)
+var owned: Dictionary = {}      # plot key -> true once bought
 
 var _garage: Garage
 var _players: Node3D
@@ -45,6 +47,7 @@ func _ready() -> void:
 	fixtures = _garage.fixtures
 	if ResourceLoader.exists(OUTSIDE):
 		add_child(load(OUTSIDE).new())
+	_build_plots()
 	_players = Node3D.new()
 	_players.name = "Players"
 	add_child(_players)
@@ -92,6 +95,19 @@ func sockets_used(provider_id: int, type: String) -> int:
 	return n
 
 
+## The bike generator this player is pedalling, if any.
+func ridden_by(peer: int) -> Item:
+	for it: Item in items.values():
+		if it.rider == peer:
+			return it
+	return null
+
+
+## Anywhere that is not under the garage roof. Solar panels only work out there.
+func is_outdoors(pos: Vector3) -> bool:
+	return absf(pos.x) > 5.5 or absf(pos.z) > 4.5
+
+
 func can_attach(child: Item, par: Item) -> bool:
 	if par == child or not par.def.has("slots"):
 		return false
@@ -99,14 +115,16 @@ func can_attach(child: Item, par: Item) -> bool:
 
 
 func debug_dump() -> String:
-	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f tripped=%s" % [
-		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, tripped]
+	var out := "PROBE peer=%d players=%s money=%.0f tokens=%.1f watts=%.0f/%.0f tripped=%s door=%s owned=%s" % [
+		multiplayer.get_unique_id(), Net.players.keys(), money, tokens, watts, capacity, tripped, door_open, owned.keys()]
 	for p: Player in _players.get_children():
 		out += "\n  player %d at %.1v" % [p.peer_id, p.position]
 	for it: Item in items.values():
 		out += "\n  item %d %s at %.1v holder=%d parent=%d/%d power=%d net=%d status=%d speed=%.3f asleep=%s pinned=%s" % [
 			it.id, it.kind, it.global_position, it.holder, it.parent, it.slot, it.power_to, it.net_to, it.status,
 			it.linear_velocity.length() + it.angular_velocity.length(), it.sleeping, it.pinned]
+		if it.def.has("gen"):
+			out += " running=%s fuel=%.2f rider=%d load=%.0f" % [it.running, it.fuel, it.rider, it.load]
 	return out
 
 
@@ -146,6 +164,78 @@ func request_door() -> void:
 	_to_host(&"_h_door", [])
 
 
+## Switch a generator on/off, or hop on/off the bike.
+func request_use(id: int) -> void:
+	_to_host(&"_h_use", [id])
+
+
+## Pour the held jerry can into a generator.
+func request_refuel(id: int) -> void:
+	_to_host(&"_h_refuel", [id])
+
+
+func request_buy_plot(key: String) -> void:
+	_to_host(&"_h_buy_plot", [key])
+
+
+# --- plots ------------------------------------------------------------------
+
+## Each plot: a concrete pad, a sale sign you buy it at, and a fibre pole that works once owned.
+func _build_plots() -> void:
+	var Fixture := preload("res://scripts/fixture.gd")
+	var pad_mat := StandardMaterial3D.new()
+	pad_mat.albedo_color = Color(0.62, 0.62, 0.6)
+	pad_mat.roughness = 0.9
+	var body := StaticBody3D.new()
+	add_child(body)
+	var next_id := -100
+	for key: String in Catalog.PLOTS:
+		var plot: Dictionary = Catalog.PLOTS[key]
+		var size := Vector3(plot["size"].x, 0.3, plot["size"].y)
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		mesh.material = pad_mat
+		var pad := MeshInstance3D.new()
+		pad.mesh = mesh
+		pad.position = plot["center"] + Vector3(0, -0.13, 0)   # top 2 cm above the grass
+		add_child(pad)
+		var shape := BoxShape3D.new()
+		shape.size = size
+		var col := CollisionShape3D.new()
+		col.shape = shape
+		col.position = pad.position
+		body.add_child(col)
+
+		var board := Fixture.new()
+		board.setup(next_id, "sign")
+		board.tag = key
+		board.label = plot["label"]
+		board.position = plot["sign"]
+		board.rotation.y = deg_to_rad(plot["sign_yaw"])
+		board.set_lamp(1)   # orange = for sale, green once sold
+		add_child(board)
+		fixtures[next_id] = board
+		var text := Label3D.new()
+		text.name = "Text"
+		text.text = "FOR SALE\n%s\n%s" % [plot["label"], UI.money(plot["price"])]
+		text.position = Vector3(0, 1.5, 0.03)
+		text.font_size = 40
+		text.pixel_size = 0.004
+		text.modulate = Color(0.08, 0.1, 0.16)
+		text.outline_size = 0
+		board.add_child(text)
+
+		var pole := Fixture.new()
+		pole.setup(next_id - 1, "uplink")
+		pole.tag = key
+		pole.position = plot["pole"]
+		pole.rotation.y = deg_to_rad(plot["sign_yaw"])
+		pole.set_lamp(0)
+		add_child(pole)
+		fixtures[next_id - 1] = pole
+		next_id -= 2
+
+
 # --- players ----------------------------------------------------------------
 
 func _reconcile_players() -> void:
@@ -165,10 +255,12 @@ func _reconcile_players() -> void:
 		for it: Item in items.values():   # someone left while carrying something
 			if it.holder != 0 and not Net.players.has(it.holder):
 				_cast(&"_r_release", [it.id, it.global_transform, Vector3.ZERO])
+			if it.rider != 0 and not Net.players.has(it.rider):
+				it.rider = 0
 	hud.set_players(Net.players)
 
 
-func _name(peer: int) -> String:
+func name_of(peer: int) -> String:
 	return Net.players.get(peer, {}).get("name", "Someone")
 
 
@@ -206,6 +298,8 @@ func _h_snapshot() -> void:
 		_r_spawn.rpc_id(peer, it.id, it.kind, it.global_transform,
 				[it.holder, it.parent, it.slot, it.power_to, it.net_to, it.pinned])
 	_r_door.rpc_id(peer, door_open)
+	for key: String in owned:
+		_r_plot.rpc_id(peer, key)
 	ready_peers.append(peer)
 	_sim_step(0.0)
 
@@ -221,6 +315,7 @@ func _h_grab(id: int) -> void:
 		return
 	if p.position.distance_to(it.global_position) > 5.0:
 		return
+	it.rider = 0   # picking up a bike throws its rider off
 	_cast(&"_r_hold", [id, peer])
 
 
@@ -287,7 +382,7 @@ func _h_link(id: int, type: String, provider_id: int) -> void:
 		if it.global_position.distance_to(target.global_position) > Catalog.MAX_CABLE:
 			return
 		if provider_id == id:   # allowed. It just doesn't do anything useful.
-			_cast(&"_r_toast", ["%s plugged a %s into itself" % [_name(Net.sender()), it.label.to_lower()]])
+			_cast(&"_r_toast", ["%s plugged a %s into itself" % [name_of(Net.sender()), it.label.to_lower()]])
 	_cast(&"_r_link", [id, type, provider_id])
 
 
@@ -301,7 +396,7 @@ func _h_buy(kind: String) -> void:
 	_sim.money -= def["price"]
 	var pos := DELIVERY + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.3, 0.3))
 	_spawn(kind, Transform3D(Basis.from_euler(Vector3(0, randf() * TAU, 0)), pos))
-	_cast(&"_r_toast", ["%s bought %s (-%s)" % [_name(Net.sender()), def["label"], UI.money(def["price"])]])
+	_cast(&"_r_toast", ["%s bought %s (-%s)" % [name_of(Net.sender()), def["label"], UI.money(def["price"])]])
 	_sim_step(0.0)
 
 
@@ -310,7 +405,7 @@ func _h_breaker() -> void:
 	if not multiplayer.is_server() or not _sim.tripped:
 		return
 	_sim.reset_breaker()
-	_cast(&"_r_toast", ["%s reset the breaker" % _name(Net.sender())])
+	_cast(&"_r_toast", ["%s reset the breaker" % name_of(Net.sender())])
 	_sim_step(0.0)
 
 
@@ -318,6 +413,58 @@ func _h_breaker() -> void:
 func _h_door() -> void:
 	if multiplayer.is_server():
 		_cast(&"_r_door", [not door_open])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_use(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := Net.sender()
+	var it: Item = items.get(id)
+	var p := player(peer)
+	if it == null or p == null or not it.def.has("gen") or it.holder != 0:
+		return
+	if it.rider != peer and p.position.distance_to(it.global_position) > 4.0:
+		return
+	match it.def["gen"]["kind"]:
+		"pedal":
+			if it.rider == peer:
+				it.rider = 0
+			elif it.rider == 0 and ridden_by(peer) == null and held_by(peer) == null:
+				it.rider = peer
+		"fuel":
+			if it.running:
+				it.running = false
+			elif it.fuel > 0.0:
+				it.running = true
+				_cast(&"_r_toast", ["%s started the %s" % [name_of(peer), it.label.to_lower()]])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_refuel(id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var can := held_by(Net.sender())
+	var it: Item = items.get(id)
+	if can == null or can.kind != "fuel" or it == null or it.def.get("gen", {}).get("kind", "") != "fuel":
+		return
+	it.fuel = 1.0
+	_cast(&"_r_despawn", [can.id])
+	_sim_step(0.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _h_buy_plot(key: String) -> void:
+	if not multiplayer.is_server() or not Catalog.PLOTS.has(key) or owned.has(key):
+		return
+	var plot: Dictionary = Catalog.PLOTS[key]
+	if _sim.money < plot["price"]:
+		return
+	_sim.money -= plot["price"]
+	_cast(&"_r_plot", [key])
+	_cast(&"_r_toast", ["%s bought the %s (-%s)" % [name_of(Net.sender()), plot["label"].to_lower(), UI.money(plot["price"])]])
+	_sim_step(0.0)
 
 
 # --- host: ticking -------------------------------------------------------------
@@ -360,7 +507,11 @@ func _sim_step(dt: float) -> void:
 	var status := _sim.step(self, dt, events)
 	for text: String in events:
 		_cast(&"_r_toast", [text])
-	_cast(&"_r_sim", [_sim.money, _sim.tokens, _sim.watts, _sim.tripped, status])
+	var gens := {}
+	for it: Item in items.values():
+		if it.def.has("gen"):
+			gens[it.id] = [it.running, it.fuel, it.rider, it.load]
+	_cast(&"_r_sim", [[_sim.money, _sim.tokens, _sim.watts, _sim.capacity, _sim.profit, _sim.tripped], status, gens])
 
 
 ## A pinned item whose support was taken away (the crate under it got picked up...) falls.
@@ -449,18 +600,46 @@ func _r_link(id: int, type: String, provider_id: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _r_sim(p_money: float, p_tokens: float, p_watts: float, p_tripped: bool, status: Dictionary) -> void:
-	money = p_money
-	tokens = p_tokens
-	watts = p_watts
-	tripped = p_tripped
+func _r_sim(company: Array, status: Dictionary, gens: Dictionary) -> void:
+	money = company[0]
+	tokens = company[1]
+	watts = company[2]
+	capacity = company[3]
+	tripped = company[5]
 	for id: int in status:
 		var it: Item = items.get(id)
 		if it:
 			it.set_status(status[id])
+	for id: int in gens:
+		var it: Item = items.get(id)
+		if it:
+			it.running = gens[id][0]
+			it.fuel = gens[id][1]
+			it.rider = gens[id][2]
+			it.load = gens[id][3]
+	fixtures[-4].set_lamp(1 if tripped else 2)
+	hud.set_stats(money, tokens, watts, capacity, company[4], tripped)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_despawn(id: int) -> void:
+	var it: Item = items.get(id)
+	if it:
+		items.erase(id)
+		it.queue_free()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _r_plot(key: String) -> void:
+	owned[key] = true
 	for f: Node3D in fixtures.values():
-		f.set_tripped(tripped)
-	hud.set_stats(money, tokens, watts, tripped)
+		if f.tag != key:
+			continue
+		f.set_lamp(2)
+		if f.kind == "uplink":
+			f.provides = "net"
+		else:
+			f.get_node("Text").text = "SOLD\n%s" % Catalog.PLOTS[key]["label"]
 
 
 @rpc("authority", "call_remote", "reliable")

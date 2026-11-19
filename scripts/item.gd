@@ -20,6 +20,11 @@ var pinned := false     # placed deliberately: stays exactly put (no physics) un
 var power_to := 0
 var net_to := 0
 var status := -1        # bit 0 powered, bit 1 online; set by the host's simulation
+# generators only (the host simulates these and replicates them twice a second)
+var running := false    # fuel generators: switched on
+var fuel := 0.0         # 0..1 tank level
+var rider := 0          # bike generator: peer id pedalling it
+var load := 0.0         # watts currently drawn from it
 
 var _world: Node3D
 var _leds: Array = []
@@ -37,6 +42,8 @@ func setup(p_id: int, p_kind: String) -> void:
 	provides = def.get("provides", "")
 	sockets = def.get("sockets", 0)
 	mass = def["mass"]
+	if def.get("gen", {}).get("kind", "") == "fuel":
+		fuel = 0.3   # sold with a splash in the tank
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	continuous_cd = true
 	for s: Array in def.get("shapes", [[def["size"], Vector3.ZERO]]):

@@ -7,6 +7,7 @@ extends Node
 ##   --bot                  local player walks, grabs and throws on its own
 ##   --yaw=DEG              initial facing of the local player
 ##   --pos=X,Y,Z            initial position of the local player
+##   --money=N              host: set the company balance
 ##   --open                 host: start with the garage door open
 ##   --selftest             host: wire up a working server through the real request path
 ##   --probe=SECONDS        print world state after N seconds, then quit
@@ -30,7 +31,7 @@ func _ready() -> void:
 
 func _setup_input() -> void:
 	var keys := {"fwd": KEY_W, "back": KEY_S, "left": KEY_A, "right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "power": KEY_F, "net": KEY_G, "rotate": KEY_R, "use": KEY_Q}
 	for action: String in keys:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = keys[action]
@@ -77,6 +78,8 @@ func _handle_args() -> void:
 		Net.host()
 	elif args.has("join"):
 		Net.join(args["join"] if args["join"] != "" else "127.0.0.1")
+	if args.has("money") and world:
+		world._sim.money = float(args["money"])
 	if args.has("open") and world:
 		world.request_door()
 	if args.has("selftest"):
@@ -124,3 +127,25 @@ func _selftest() -> void:
 	key.physical_keycode = KEY_E
 	key.pressed = true
 	Input.parse_input_event(key)
+
+	# generators and land: mower generator takes over the power strip, someone pedals the bike,
+	# and the backyard gets bought (needs --money)
+	await get_tree().create_timer(0.5).timeout
+	for kind: String in ["gen_mower", "gen_bike", "fuel"]:
+		world.request_buy(kind)
+	await get_tree().create_timer(0.3).timeout
+	for it: Node3D in world.items.values():
+		by_kind[it.kind] = it
+	var strip: Node3D = by_kind["powerstrip"]
+	me.position = by_kind["gen_mower"].global_position + Vector3(0, 0, 1)
+	world.request_use(by_kind["gen_mower"].id)
+	world.request_link(strip.id, "power", 0)
+	world.request_link(strip.id, "power", by_kind["gen_mower"].id)
+	world.request_grab(by_kind["fuel"].id)
+	world.request_refuel(by_kind["gen_mower"].id)
+	world.request_use(by_kind["gen_bike"].id)
+	world.request_buy_plot("backyard")
+	# overload: the 250 W bike cannot carry a 260 W server, so the rider gets thrown off
+	await get_tree().create_timer(1.0).timeout
+	world.request_link(strip.id, "power", 0)
+	world.request_link(strip.id, "power", by_kind["gen_bike"].id)

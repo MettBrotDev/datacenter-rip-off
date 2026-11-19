@@ -4,6 +4,7 @@ extends CharacterBody3D
 
 const Blob = preload("res://scripts/blob.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const UI = preload("res://scripts/ui.gd")
 const WALK := 4.0
 const SPRINT := 6.5
 const JUMP := 4.6
@@ -153,7 +154,8 @@ func _process(dt: float) -> void:
 			head.rotation.x = lerpf(head.rotation.x, s[2], k)
 	velocity_estimate = (position - _last_pos) / dt
 	_last_pos = position
-	_blob.animate(dt, Vector2(velocity_estimate.x, velocity_estimate.z).length(), head.rotation.x)
+	var pace := Vector2(velocity_estimate.x, velocity_estimate.z).length()
+	_blob.animate(dt, 5.0 if _world.ridden_by(peer_id) else pace, head.rotation.x)
 
 
 func _move(dt: float) -> void:
@@ -162,6 +164,11 @@ func _move(dt: float) -> void:
 	if position.y < -20.0:   # fell out of the world
 		position = _spawn
 		velocity = Vector3.ZERO
+	var bike: Node3D = _world.ridden_by(peer_id)
+	if bike:   # pedalling: stuck to the saddle until we hop off
+		position = bike.global_position + Vector3(0, 0.1, 0)
+		velocity = Vector3.ZERO
+		return
 	var speed := WALK
 	if Net.bot:
 		_bot(dt)
@@ -214,7 +221,11 @@ func _update_actions() -> void:
 	_place_xf = null
 	if not _cable.is_empty() and (held or not _world.items.has(_cable["id"])):
 		_set_cable({})
-	if not _cable.is_empty():
+	var bike: Node3D = _world.ridden_by(peer_id)
+	if bike:
+		acts.append(["use", "[Q] Hop off", _world.request_use.bind(bike.id)])
+		acts.append(["", "Pedalling: %d / %d W" % [bike.load, bike.def["gen"]["watts"]], Callable()])
+	elif not _cable.is_empty():
 		var type: String = _cable["type"]
 		if t and t.provides == type:
 			if _world.sockets_used(t.id, type) < t.sockets:
@@ -225,7 +236,10 @@ func _update_actions() -> void:
 			acts.append(["", "Holding a %s cable. Find somewhere to plug it in." % WORDS[type], Callable()])
 		acts.append([type, "[%s] Let go" % KEYS[type], _set_cable.bind({})])
 	elif held:
-		if t is RigidBody3D and _world.can_attach(held, t):
+		if held.kind == "fuel" and t is RigidBody3D and t.def.get("gen", {}).get("kind", "") == "fuel":
+			acts.append(["interact", "[E] Refuel %s (%d%% full)" % [t.label.to_lower(), t.fuel * 100.0],
+					_world.request_refuel.bind(t.id)])
+		elif t is RigidBody3D and _world.can_attach(held, t):
 			acts.append(["interact", "[E] Mount on %s" % t.label.to_lower(), _world.request_attach.bind(t.id)])
 		else:
 			_place_xf = _placement(held)
@@ -246,12 +260,29 @@ func _update_actions() -> void:
 			else:
 				acts.append([type, "[%s] Grab %s cable" % [KEYS[type], WORDS[type]],
 						_set_cable.bind({"id": t.id, "type": type})])
+		if t.def.has("gen"):
+			_generator_actions(t, acts)
 		if t.provides != "":
 			acts.append(["", "%d/%d sockets used" % [_world.sockets_used(t.id, t.provides), t.sockets], Callable()])
 	elif t:
 		match t.kind:
 			"shop":
 				acts.append(["interact", "[E] Open the parts market", _world.hud.open_shop])
+			"sign":
+				var plot: Dictionary = Catalog.PLOTS[t.tag]
+				if _world.owned.has(t.tag):
+					acts.append(["", "%s: yours" % plot["label"], Callable()])
+				elif _world.money >= plot["price"]:
+					acts.append(["interact", "[E] Buy the %s for %s" % [plot["label"].to_lower(), UI.money(plot["price"])],
+							_world.request_buy_plot.bind(t.tag)])
+				else:
+					acts.append(["", "%s: %s. You are %s short." % [plot["label"], UI.money(plot["price"]),
+							UI.money(plot["price"] - _world.money)], Callable()])
+			"uplink":
+				if t.provides == "":
+					acts.append(["", "Fibre pole: buy this plot to connect it", Callable()])
+				else:
+					acts.append(["", "Fibre pole: %d/%d sockets used" % [_world.sockets_used(t.id, "net"), t.sockets], Callable()])
 			"door":
 				acts.append(["interact", "[E] %s the garage door" % ("Close" if _world.door_open else "Open"),
 						_world.request_door])
@@ -304,6 +335,27 @@ func _place() -> void:
 
 func _rotate() -> void:
 	_place_turns += 1
+
+
+func _generator_actions(t: Node3D, acts: Array) -> void:
+	var gen: Dictionary = t.def["gen"]
+	var output := "%d / %d W" % [t.load, gen["watts"]]
+	match gen["kind"]:
+		"pedal":
+			if t.rider == 0:
+				acts.append(["use", "[Q] Hop on and pedal", _world.request_use.bind(t.id)])
+			else:
+				acts.append(["", "%s is pedalling: %s" % [_world.name_of(t.rider), output], Callable()])
+		"fuel":
+			if t.running:
+				acts.append(["use", "[Q] Switch off", _world.request_use.bind(t.id)])
+			elif t.fuel > 0.0:
+				acts.append(["use", "[Q] Start it up", _world.request_use.bind(t.id)])
+			acts.append(["", "Fuel %d%%   %s" % [ceilf(t.fuel * 100.0), output] if t.fuel > 0.0
+					else "Out of fuel: bring a jerry can", Callable()])
+		"solar":
+			acts.append(["", "Solar: %s" % output if _world.is_outdoors(t.global_position)
+					else "Solar panels need to be outdoors", Callable()])
 
 
 func _set_cable(cable: Dictionary) -> void:

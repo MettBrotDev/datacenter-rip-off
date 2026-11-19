@@ -84,7 +84,7 @@ func _ready() -> void:
 	hints.size_flags_vertical = Control.SIZE_SHRINK_END
 	hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hints)
-	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Use   R Rotate   F Power cable   G Network cable   Esc Pause", 14, UI.DIM))
+	hints.add_child(UI.label("WASD Move   Shift Sprint   Space Jump   E Grab   Q Use   R Rotate   F Power cable   G Network cable   Esc Pause", 14, UI.DIM))
 
 	_shop = Shop.new()
 	_shop.world = get_parent()
@@ -113,12 +113,13 @@ func set_players(players: Dictionary) -> void:
 		_list.add_child(row)
 
 
-func set_stats(money: float, tokens: float, watts: float, tripped: bool) -> void:
-	var profit := (tokens * Catalog.TOKEN_PRICE - watts * Catalog.POWER_PRICE) * 60.0
+## capacity = watts available right now (grid + running generators); profit is $ per second.
+func set_stats(money: float, tokens: float, watts: float, capacity: float, profit: float, tripped: bool) -> void:
+	profit *= 60.0
 	_values["COMPUTE"].text = "%.0f tok/s" % tokens
-	_values["POWER"].text = "TRIPPED" if tripped else "%d / %d W" % [watts, Catalog.BREAKER_WATTS]
+	_values["POWER"].text = "%d / %d W" % [watts, capacity]
 	_values["POWER"].add_theme_color_override("font_color",
-			UI.RED if tripped or watts > Catalog.BREAKER_WATTS else UI.TEXT)
+			UI.RED if tripped or watts > capacity else UI.TEXT)
 	_values["NET PROFIT"].text = ("+" if profit >= 0.0 else "-") + UI.money(absf(profit)) + "/min"
 	_values["NET PROFIT"].add_theme_color_override("font_color", UI.GREEN if profit >= 0.0 else UI.RED)
 	_values["BALANCE"].text = UI.money(money)
@@ -133,7 +134,7 @@ func toast(text: String) -> void:
 	_toasts.add_child(p)
 	if _toasts.get_child_count() > 5:
 		_toasts.get_child(0).queue_free()
-	get_tree().create_timer(6.0).timeout.connect(func(): if is_instance_valid(p): p.queue_free())
+	p.create_tween().tween_callback(p.queue_free).set_delay(6.0)   # the tween dies with the panel
 
 
 func open_shop() -> void:

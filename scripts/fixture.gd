@@ -25,7 +25,20 @@ const KINDS := {
 		[Vector3(0.14, 0.2, 0.05), Vector3(0, 0, 0.025), Color(0.85, 0.75, 0.15), 0.0],
 		[Vector3(0.07, 0.07, 0.02), Vector3(0, 0.03, 0.055), Color(0.2, 1.0, 0.5), 2.5],
 	]},
-	"shop": {"label": "Shop laptop", "provides": "", "sockets": 0, "size": Vector3(0.42, 0.3, 0.3), "parts": [
+	"sign": {"label": "For sale", "provides": "", "sockets": 0,
+		"size": Vector3(1.3, 0.9, 0.12), "center": Vector3(0, 1.5, 0), "parts": [
+			[Vector3(0.09, 1.9, 0.09), Vector3(0, 0.95, -0.06), Color(0.45, 0.3, 0.18), 0.0],
+			[Vector3(1.3, 0.9, 0.05), Vector3(0, 1.5, 0), Color(0.95, 0.95, 0.92), 0.0],
+			[Vector3(1.3, 0.08, 0.06), Vector3(0, 1.91, 0), Color(0.2, 1.0, 0.5), 2.0, "lamp"],
+		]},
+	"uplink": {"label": "Fibre pole", "provides": "", "sockets": 4,
+		"size": Vector3(0.44, 0.34, 0.26), "center": Vector3(0, 1.3, 0.12), "parts": [
+			[Vector3(0.14, 3.2, 0.14), Vector3(0, 1.6, 0), Color(0.4, 0.28, 0.18), 0.0],
+			[Vector3(0.4, 0.3, 0.12), Vector3(0, 1.3, 0.13), Color(0.93, 0.93, 0.95), 0.0],
+			[Vector3(0.26, 0.02, 0.01), Vector3(0, 1.38, 0.195), Color(0.2, 1.0, 0.5), 2.5, "lamp"],
+		]},
+	"shop": {"label": "Shop laptop", "provides": "", "sockets": 0,
+		"size": Vector3(0.42, 0.3, 0.3), "center": Vector3(0, 0.15, 0), "parts": [
 		[Vector3(0.36, 0.02, 0.25), Vector3(0, 0.01, 0.02), Color(0.2, 0.21, 0.24), 0.0],
 		[Vector3(0.36, 0.24, 0.012), Vector3(0, 0.14, -0.105), Color(0.2, 0.21, 0.24), 0.0],
 		[Vector3(0.33, 0.2, 0.004), Vector3(0, 0.14, -0.097), Color(0.25, 0.6, 1.0), 1.4],
@@ -37,6 +50,7 @@ var kind := ""
 var label := ""
 var provides := ""
 var sockets := 0
+var tag := ""           # free-form: which plot a sale sign or uplink pole belongs to
 
 var _lamp: StandardMaterial3D
 
@@ -53,13 +67,13 @@ func setup(p_id: int, p_kind: String) -> void:
 	box.size = size
 	var shape := CollisionShape3D.new()
 	shape.shape = box
-	shape.position = Vector3(0, size.y * 0.5, 0) if kind == "shop" else Vector3(0, 0, size.z * 0.5)
+	shape.position = def.get("center", Vector3(0, 0, size.z * 0.5))
 	add_child(shape)
 	for tagged: Array in Catalog.build_parts(self, def["parts"]):
 		_lamp = tagged[1]
 
 
-## Breaker box lamp: green when fine, orange when tripped.
-func set_tripped(on: bool) -> void:
+## The fixture's indicator lamp, if it has one: 0 off, 1 orange (warning), 2 its own colour.
+func set_lamp(level: int) -> void:
 	if _lamp:
-		Catalog.set_light(_lamp, 1 if on else 2)
+		Catalog.set_light(_lamp, level)

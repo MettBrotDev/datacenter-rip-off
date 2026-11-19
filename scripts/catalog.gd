@@ -7,6 +7,8 @@ extends RefCounted
 ##   power_port  has a power cable        net_port  has a network cable
 ##   provides    "power" | "net" — other cables can plug into it, up to `sockets`
 ##   watts, tokens   power draw and compute output while running
+##   gen         {"kind": "pedal" | "fuel" | "solar", "watts": output, "burn": seconds per full tank}
+##               a power source of its own. pedal = someone rides it, solar = outdoors only
 ##   solid       players cannot walk through it (small items are walk-through on purpose)
 ##   shapes      [[size, offset]...] collision boxes (default: one box of `size`)
 ##   parts       [[size, offset, colour, emission, tag]...] visual boxes; tag "led" = status light
@@ -16,7 +18,19 @@ const TOKEN_PRICE := 0.25        # $ earned per token
 const POWER_PRICE := 0.0004      # $ paid per watt-second
 const BREAKER_WATTS := 3600.0    # the garage's single circuit
 const MAX_CABLE := 7.0           # metres before a cable gets yanked out
-const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack", "crate"]
+const SHOP: Array[String] = ["server", "gpu_1080", "gpu_4070", "gpu_4090", "powerstrip", "switch", "rack",
+	"gen_bike", "gen_mower", "gen_solar", "gen_diesel", "fuel", "crate"]
+
+## Land you can buy by walking up to its sale sign. `sign` and `pole` are world positions;
+## the fibre pole on a plot only works once the plot is owned. No wall power out there.
+const PLOTS := {
+	"backyard": {"label": "Backyard pad", "price": 2500, "center": Vector3(0, 0, -15), "size": Vector2(10, 12),
+		"sign": Vector3(4.2, 0, -8.6), "sign_yaw": 0.0, "pole": Vector3(-4.4, 0, -9.6)},
+	"east": {"label": "East lot", "price": 12000, "center": Vector3(21, 0, 0), "size": Vector2(16, 14),
+		"sign": Vector3(12.6, 0, 5.5), "sign_yaw": -90.0, "pole": Vector3(13.6, 0, -6.2)},
+	"field": {"label": "Field across the street", "price": 50000, "center": Vector3(0, 0, 41), "size": Vector2(26, 16),
+		"sign": Vector3(5.0, 0, 32.6), "sign_yaw": 180.0, "pole": Vector3(-12.2, 0, 33.6)},
+}
 
 static var ITEMS: Dictionary = _build()
 
@@ -66,6 +80,57 @@ static func _build() -> Dictionary:
 				[Vector3(0.28, 0.045, 0.16), Vector3.ZERO, Color(0.13, 0.18, 0.3), 0.0],
 				[Vector3(0.2, 0.01, 0.01), Vector3(-0.02, 0.01, -0.081), Color(0.2, 1.0, 0.5), 2.5, "led"],
 			]},
+		# --- power generation, from scuffed to serious ---
+		"gen_bike": {"label": "Exercise bike generator", "price": 150, "provides": "power", "sockets": 1,
+			"gen": {"kind": "pedal", "watts": 250.0},
+			"size": Vector3(0.5, 1.0, 1.1), "mass": 18.0, "parts": [
+				[Vector3(0.5, 0.06, 1.1), Vector3(0, -0.47, 0), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(0.08, 0.7, 0.08), Vector3(0, -0.1, 0.25), Color(0.85, 0.2, 0.2), 0.0],
+				[Vector3(0.26, 0.06, 0.3), Vector3(0, 0.28, 0.25), Color(0.1, 0.1, 0.12), 0.0],
+				[Vector3(0.08, 0.9, 0.08), Vector3(0, 0.0, -0.35), Color(0.85, 0.2, 0.2), 0.0],
+				[Vector3(0.5, 0.05, 0.05), Vector3(0, 0.45, -0.35), Color(0.1, 0.1, 0.12), 0.0],
+				[Vector3(0.06, 0.5, 0.5), Vector3(0, -0.2, -0.1), Color(0.6, 0.62, 0.66), 0.0],
+				[Vector3(0.2, 0.14, 0.2), Vector3(0, -0.37, 0.42), Color(0.95, 0.75, 0.1), 0.0],
+				[Vector3(0.04, 0.04, 0.02), Vector3(0, -0.34, 0.53), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"gen_mower": {"label": "Lawnmower generator", "price": 450, "provides": "power", "sockets": 2,
+			"gen": {"kind": "fuel", "watts": 1200.0, "burn": 600.0},
+			"size": Vector3(0.6, 0.5, 0.85), "mass": 30.0, "parts": [
+				[Vector3(0.6, 0.16, 0.85), Vector3(0, -0.14, 0), Color(0.8, 0.15, 0.12), 0.0],
+				[Vector3(0.3, 0.26, 0.3), Vector3(0, 0.07, -0.1), Color(0.2, 0.2, 0.23), 0.0],
+				[Vector3(0.12, 0.1, 0.12), Vector3(0.18, 0.0, 0.25), Color(0.9, 0.9, 0.88), 0.0],
+				[Vector3(0.05, 0.5, 0.05), Vector3(-0.2, 0.25, 0.4), Color(0.6, 0.62, 0.66), 0.0],
+				[Vector3(0.05, 0.5, 0.05), Vector3(0.2, 0.25, 0.4), Color(0.6, 0.62, 0.66), 0.0],
+				[Vector3(0.14, 0.14, 0.06), Vector3(-0.3, -0.2, 0.3), Color(0.08, 0.08, 0.08), 0.0],
+				[Vector3(0.14, 0.14, 0.06), Vector3(0.3, -0.2, 0.3), Color(0.08, 0.08, 0.08), 0.0],
+				[Vector3(0.14, 0.14, 0.06), Vector3(-0.3, -0.2, -0.3), Color(0.08, 0.08, 0.08), 0.0],
+				[Vector3(0.14, 0.14, 0.06), Vector3(0.3, -0.2, -0.3), Color(0.08, 0.08, 0.08), 0.0],
+				[Vector3(0.06, 0.04, 0.02), Vector3(0, 0.1, -0.26), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"gen_solar": {"label": "Solar panel", "price": 900, "provides": "power", "sockets": 1,
+			"gen": {"kind": "solar", "watts": 400.0},
+			"size": Vector3(1.6, 0.08, 1.0), "mass": 12.0, "parts": [
+				[Vector3(1.6, 0.06, 1.0), Vector3(0, -0.01, 0), Color(0.75, 0.77, 0.8), 0.0],
+				[Vector3(1.5, 0.02, 0.9), Vector3(0, 0.03, 0), Color(0.06, 0.12, 0.35), 0.0],
+				[Vector3(0.02, 0.022, 0.9), Vector3(-0.375, 0.031, 0), Color(0.75, 0.77, 0.8), 0.0],
+				[Vector3(0.02, 0.022, 0.9), Vector3(0, 0.031, 0), Color(0.75, 0.77, 0.8), 0.0],
+				[Vector3(0.02, 0.022, 0.9), Vector3(0.375, 0.031, 0), Color(0.75, 0.77, 0.8), 0.0],
+				[Vector3(0.06, 0.03, 0.02), Vector3(0.7, 0.0, 0.5), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"gen_diesel": {"label": "Diesel generator", "price": 2800, "provides": "power", "sockets": 4, "solid": true,
+			"gen": {"kind": "fuel", "watts": 5000.0, "burn": 900.0},
+			"size": Vector3(0.8, 0.9, 1.4), "mass": 90.0, "parts": [
+				[Vector3(0.8, 0.9, 1.4), Vector3.ZERO, Color(0.95, 0.72, 0.1), 0.0],
+				[Vector3(0.82, 0.3, 0.9), Vector3(0, -0.1, 0), Color(0.15, 0.15, 0.17), 0.0],
+				[Vector3(0.1, 0.4, 0.1), Vector3(0.25, 0.6, -0.5), Color(0.3, 0.3, 0.33), 0.0],
+				[Vector3(0.5, 0.25, 0.02), Vector3(0, 0.2, -0.705), Color(0.1, 0.1, 0.12), 0.0],
+				[Vector3(0.3, 0.03, 0.01), Vector3(0, 0.25, -0.72), Color(0.2, 1.0, 0.5), 3.0, "led"],
+			]},
+		"fuel": {"label": "Jerry can", "price": 40, "size": Vector3(0.3, 0.4, 0.16), "mass": 4.0, "parts": [
+			[Vector3(0.3, 0.36, 0.16), Vector3(0, -0.02, 0), Color(0.75, 0.1, 0.08), 0.0],
+			[Vector3(0.08, 0.06, 0.08), Vector3(0.08, 0.18, 0), Color(0.1, 0.1, 0.1), 0.0],
+			[Vector3(0.14, 0.03, 0.04), Vector3(-0.05, 0.19, 0), Color(0.75, 0.1, 0.08), 0.0],
+		]},
 		"rack": {"label": "Open rack", "price": 250, "solid": true,
 			"slots": {"accepts": "server", "yaw": 0.0, "at": [
 				Vector3(0, -0.62, 0), Vector3(0, -0.22, 0), Vector3(0, 0.18, 0), Vector3(0, 0.58, 0)]},

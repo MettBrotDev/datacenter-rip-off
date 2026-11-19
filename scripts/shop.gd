@@ -37,11 +37,19 @@ func _ready() -> void:
 	head.add_child(_balance)
 	v.add_child(UI.label("Dropped off at the garage door. No refunds.", 14, UI.DIM))
 
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size.y = 520
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(scroll)
+	var rows := VBoxContainer.new()
+	rows.size_flags_horizontal = SIZE_EXPAND_FILL
+	rows.add_theme_constant_override("separation", 6)
+	scroll.add_child(rows)
 	for kind: String in Catalog.SHOP:
 		var def: Dictionary = Catalog.ITEMS[kind]
 		var row_panel := PanelContainer.new()
 		row_panel.add_theme_stylebox_override("panel", UI.box(UI.BG_DARK, 8, UI.BORDER, 10))
-		v.add_child(row_panel)
+		rows.add_child(row_panel)
 		var row := HBoxContainer.new()
 		row_panel.add_child(row)
 		var text := VBoxContainer.new()
@@ -69,6 +77,11 @@ func set_money(money: float) -> void:
 
 func _describe(def: Dictionary) -> String:
 	var bits: Array[String] = []
+	if def.has("gen"):
+		var gen: Dictionary = def["gen"]
+		bits.append("makes %d W" % gen["watts"])
+		bits.append({"pedal": "someone has to pedal", "solar": "outdoors only, free power",
+			"fuel": "%d min per jerry can at full load" % (gen.get("burn", 0.0) / 60.0)}[gen["kind"]])
 	if def.has("tokens"):
 		bits.append("%s tokens/s" % def["tokens"])
 	if def.has("watts"):
